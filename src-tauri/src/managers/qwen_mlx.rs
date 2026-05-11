@@ -48,7 +48,7 @@ impl QwenMlxEngine {
             anyhow::bail!("Qwen3 MLX worker not found: {}", worker_path.display());
         }
 
-        let python = find_python_with_qwen3_mlx(model_path)?;
+        let python = find_python_with_qwen3_mlx(model_path, worker_path)?;
         let mut child = Command::new(&python)
             .arg(worker_path)
             .arg(model_path)
@@ -208,7 +208,7 @@ fn write_temp_wav(audio: &[f32], request_id: u64) -> Result<PathBuf> {
     Ok(path)
 }
 
-fn find_python_with_qwen3_mlx(model_path: &Path) -> Result<PathBuf> {
+fn find_python_with_qwen3_mlx(model_path: &Path, worker_path: &Path) -> Result<PathBuf> {
     if let Some(path) = std::env::var_os("HANDY_QWEN3_MLX_PYTHON") {
         let candidate = PathBuf::from(path);
         if python_can_import_qwen3(&candidate) {
@@ -229,6 +229,12 @@ fn find_python_with_qwen3_mlx(model_path: &Path) -> Result<PathBuf> {
         }
     }
 
+    if let Ok(managed_python) = managed_python_path(model_path) {
+        if managed_python.exists() && python_can_import_qwen3(&managed_python) {
+            return Ok(managed_python);
+        }
+    }
+
     if let Ok(cwd) = std::env::current_dir() {
         for ancestor in cwd.ancestors() {
             let candidate = ancestor.join(".asr-bench/bin/python");
@@ -245,8 +251,15 @@ fn find_python_with_qwen3_mlx(model_path: &Path) -> Result<PathBuf> {
         }
     }
 
+    match ensure_managed_python_with_qwen3_mlx(model_path, worker_path) {
+        Ok(python) => return Ok(python),
+        Err(err) => {
+            log::warn!("Qwen3 MLX managed Python setup failed: {}", err);
+        }
+    }
+
     anyhow::bail!(
-        "No Python with mlx-qwen3-asr found. Install mlx-qwen3-asr or set HANDY_QWEN3_MLX_PYTHON."
+        "No Python with mlx-qwen3-asr found. Handy tried to create a private runtime automatically, but setup failed. Check your internet connection or set HANDY_QWEN3_MLX_PYTHON."
     );
 }
 
@@ -268,4 +281,194 @@ fn python_can_import_qwen3(python: &Path) -> bool {
         .status()
         .map(|status| status.success())
         .unwrap_or(false)
+}
+
+fn ensure_managed_python_with_qwen3_mlx(model_path: &Path, worker_path: &Path) -> Result<PathBuf> {
+    let runtime_dir = managed_runtime_dir(model_path)?;
+    let python = managed_python_path(model_path)?;
+
+    fs::create_dir_all(&runtime_dir).with_context(|| {
+        format!(
+            "failed to create Qwen3 MLX runtime directory: {}",
+            runtime_dir.display()
+        )
+    })?;
+
+    if !python.exists() {
+        if let Some(base_python) = find_bootstrap_python() {
+            log::info!(
+                "Creating Qwen3 MLX Python runtime with {}",
+                base_python.display()
+            );
+            let mut command = Command::new(&base_python);
+            command.arg("-m").arg("venv").arg(&runtime_dir);
+            run_and_check(&mut command, "create Qwen3 MLX Python venv")?;
+        } else {
+            let uv = find_uv(worker_path)?;
+            log::info!(
+                "Creating Qwen3 MLX Python runtime with uv at {}",
+                uv.display()
+            );
+            let mut command = Command::new(&uv);
+            command
+                .arg("venv")
+                .arg("--python")
+                .arg("3.12")
+                .arg(&runtime_dir)
+                .env("UV_NO_PROGRESS", "1");
+            run_and_check(&mut command, "create Qwen3 MLX Python venv with uv")?;
+        }
+    }
+
+    install_qwen3_mlx_package(&python, worker_path)?;
+    if python_can_import_qwen3(&python) {
+        return Ok(python);
+    }
+
+    anyhow::bail!(
+        "managed Python runtime was created, but it cannot import mlx_qwen3_asr: {}",
+        python.display()
+    );
+}
+
+fn install_qwen3_mlx_package(python: &Path, worker_path: &Path) -> Result<()> {
+    if python_can_import_qwen3(python) {
+        return Ok(());
+    }
+
+    let package = "mlx-qwen3-asr==0.3.3";
+    if let Ok(uv) = find_uv(worker_path) {
+        log::info!("Installing {} into Qwen3 MLX runtime with uv", package);
+        let mut command = Command::new(&uv);
+        command
+            .arg("pip")
+            .arg("install")
+            .arg("--python")
+            .arg(python)
+            .arg(package)
+            .env("UV_NO_PROGRESS", "1");
+        run_and_check(&mut command, "install mlx-qwen3-asr with uv")?;
+        return Ok(());
+    }
+
+    log::info!("Installing {} into Qwen3 MLX runtime with pip", package);
+    let mut command = Command::new(python);
+    command
+        .arg("-m")
+        .arg("pip")
+        .arg("install")
+        .arg("--upgrade")
+        .arg(package)
+        .env("PIP_DISABLE_PIP_VERSION_CHECK", "1");
+    run_and_check(&mut command, "install mlx-qwen3-asr with pip")?;
+    Ok(())
+}
+
+fn managed_runtime_dir(model_path: &Path) -> Result<PathBuf> {
+    let models_dir = model_path
+        .parent()
+        .ok_or_else(|| anyhow::anyhow!("model path has no parent: {}", model_path.display()))?;
+    Ok(models_dir.join(".qwen3-mlx-runtime"))
+}
+
+fn managed_python_path(model_path: &Path) -> Result<PathBuf> {
+    let runtime_dir = managed_runtime_dir(model_path)?;
+    if cfg!(target_os = "windows") {
+        Ok(runtime_dir.join("Scripts").join("python.exe"))
+    } else {
+        Ok(runtime_dir.join("bin").join("python"))
+    }
+}
+
+fn find_bootstrap_python() -> Option<PathBuf> {
+    let candidates = [
+        "python3.12",
+        "python3.11",
+        "python3.10",
+        "python3",
+        "/opt/homebrew/bin/python3",
+        "/usr/local/bin/python3",
+        "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3",
+    ];
+
+    candidates
+        .iter()
+        .map(PathBuf::from)
+        .find(|candidate| python_version_can_run_qwen3(candidate))
+}
+
+fn python_version_can_run_qwen3(python: &Path) -> bool {
+    Command::new(python)
+        .arg("-c")
+        .arg("import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map(|status| status.success())
+        .unwrap_or(false)
+}
+
+fn find_uv(worker_path: &Path) -> Result<PathBuf> {
+    if let Some(path) = std::env::var_os("HANDY_QWEN3_MLX_UV") {
+        let candidate = PathBuf::from(path);
+        if uv_works(&candidate) {
+            return Ok(candidate);
+        }
+    }
+
+    if let Some(resource_dir) = worker_path.parent() {
+        for name in ["uv-aarch64-apple-darwin", "uv"] {
+            let candidate = resource_dir.join(name);
+            if candidate.exists() && uv_works(&candidate) {
+                return Ok(candidate);
+            }
+        }
+    }
+
+    if let Ok(cwd) = std::env::current_dir() {
+        for ancestor in cwd.ancestors() {
+            let candidate = ancestor.join("src-tauri/resources/uv-aarch64-apple-darwin");
+            if candidate.exists() && uv_works(&candidate) {
+                return Ok(candidate);
+            }
+        }
+    }
+
+    let candidate = PathBuf::from("uv");
+    if uv_works(&candidate) {
+        return Ok(candidate);
+    }
+
+    anyhow::bail!("uv executable not found for Qwen3 MLX Python setup")
+}
+
+fn uv_works(uv: &Path) -> bool {
+    Command::new(uv)
+        .arg("--version")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map(|status| status.success())
+        .unwrap_or(false)
+}
+
+fn run_and_check(command: &mut Command, description: &str) -> Result<()> {
+    let output = command
+        .output()
+        .with_context(|| format!("failed to run command for {description}"))?;
+    if output.status.success() {
+        return Ok(());
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    anyhow::bail!(
+        "{} failed with status {}.\nstdout:\n{}\nstderr:\n{}",
+        description,
+        output.status,
+        stdout.trim(),
+        stderr.trim()
+    );
 }

@@ -36,9 +36,17 @@ Qwen3 MLX 모델 파일은 Handy 앱 안에서 다운로드할 수 있습니다.
 - [qwen3-asr-0.6b-mlx-q8-g64.tar.gz](https://github.com/kutd/Handy/releases/download/qwen3-mlx-models-v1/qwen3-asr-0.6b-mlx-q8-g64.tar.gz)
 - [qwen3-asr-1.7b-mlx-q4-g64.tar.gz](https://github.com/kutd/Handy/releases/download/qwen3-mlx-models-v1/qwen3-asr-1.7b-mlx-q4-g64.tar.gz)
 
-Python 환경은 포함되어 있지 않습니다. Handy가 `mlx_qwen3_asr`를 import할 수 있는 Python 실행 파일은 별도로 준비해야 합니다.
+Handy는 `uv`를 함께 포함하며, 첫 사용 시 Qwen3 MLX 전용 Python 런타임을 자동으로 만듭니다. 이 런타임에는 `mlx-qwen3-asr==0.3.3`이 설치되며 위치는 다음과 같습니다.
+
+```text
+~/Library/Application Support/com.pais.handy/models/.qwen3-mlx-runtime
+```
+
+처음 Qwen3 모델을 사용할 때는 런타임 생성 때문에 시간이 더 걸릴 수 있습니다. 최초 생성에는 인터넷 연결이 필요합니다.
 
 Qwen3-ASR 모델 계열은 Hugging Face에서 Apache License 2.0 메타데이터로 공개되어 있습니다. 이 포크의 모델 tarball에는 출처와 MLX/양자화 재패키징 내용을 기록한 `LICENSE`와 `NOTICE` 파일을 포함했습니다.
+
+직접 준비한 Python 환경을 쓰고 싶다면, `mlx_qwen3_asr`를 import할 수 있는 Python 실행 파일을 `HANDY_QWEN3_MLX_PYTHON` 환경 변수로 지정하면 됩니다.
 
 Handy의 모델 폴더 안에 Qwen3 MLX 모델 디렉터리를 아래 이름으로 배치합니다.
 
@@ -56,7 +64,7 @@ macOS에서 일반적인 위치는 다음과 같습니다.
 ~/Library/Application Support/com.pais.handy/models/qwen3-asr-1.7b-mlx-q4-g64
 ```
 
-그 다음 Handy가 `mlx_qwen3_asr`를 import할 수 있는 Python 실행 파일을 찾을 수 있게 해야 합니다. 방법은 둘 중 하나입니다.
+수동으로 Python 경로를 지정하려면 방법은 둘 중 하나입니다.
 
 환경 변수 사용:
 

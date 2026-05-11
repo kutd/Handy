@@ -23,9 +23,17 @@ The Qwen3 MLX model files can be downloaded from inside Handy. They are hosted a
 - [qwen3-asr-0.6b-mlx-q8-g64.tar.gz](https://github.com/kutd/Handy/releases/download/qwen3-mlx-models-v1/qwen3-asr-0.6b-mlx-q8-g64.tar.gz)
 - [qwen3-asr-1.7b-mlx-q4-g64.tar.gz](https://github.com/kutd/Handy/releases/download/qwen3-mlx-models-v1/qwen3-asr-1.7b-mlx-q4-g64.tar.gz)
 
-The Python environment is not bundled. Handy still needs a Python executable that can import `mlx_qwen3_asr`.
+Handy bundles `uv` and creates a private Qwen3 MLX Python runtime automatically on first use. It installs `mlx-qwen3-asr==0.3.3` into:
+
+```text
+~/Library/Application Support/com.pais.handy/models/.qwen3-mlx-runtime
+```
+
+The first Qwen3 transcription may take longer while this runtime is created. An internet connection is required the first time.
 
 The Qwen3-ASR model family is published with Apache License 2.0 metadata on Hugging Face. The model tarballs in this fork include `LICENSE` and `NOTICE` files that preserve attribution and document the MLX/quantization repackaging.
+
+If you prefer to use your own Python environment, set `HANDY_QWEN3_MLX_PYTHON` to a Python executable that can import `mlx_qwen3_asr`.
 
 For manual local testing, place MLX model directories at Handy's model location with these names:
 
@@ -36,7 +44,7 @@ qwen3-asr-1.7b-mlx-q4-g64
 
 The 1.7B 4-bit directory should use a `mlx-qwen3-asr`-compatible 4-bit, group-size-64 conversion of `Qwen/Qwen3-ASR-1.7B`.
 
-Then make Handy able to find a Python executable that can import `mlx_qwen3_asr`. Either set:
+For manual override, either set:
 
 ```bash
 HANDY_QWEN3_MLX_PYTHON=/path/to/python
