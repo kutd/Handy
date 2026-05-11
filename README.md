@@ -6,6 +6,36 @@
 
 Handy is a cross-platform desktop application that provides simple, privacy-focused speech transcription. Press a shortcut, speak, and have your words appear in any text field. This happens on your own computer without sending any information to the cloud.
 
+## Fork Notes: Korean Qwen3 MLX ASR
+
+This fork adds an experimental local ASR path focused on faster Korean dictation on Apple Silicon.
+
+- Adds a new model option: **Qwen3 ASR 0.6B 8-bit MLX** (`qwen3-mlx-0.6b-8bit`)
+- Keeps Handy's existing VAD and recording flow, then sends finalized audio to Qwen3 ASR
+- Uses a persistent Python worker so `mlx-qwen3-asr` keeps one `Session` loaded instead of reloading model weights for every transcription
+- Passes Korean language hints and Handy custom words as Qwen3 context to improve Korean dictation
+- Leaves the original Whisper, Parakeet, SenseVoice, GigaAM, Canary, and Cohere paths intact
+
+The Qwen3 MLX model and Python environment are not bundled in this repository. For local testing, place the MLX model directory at Handy's model location with this name:
+
+```text
+qwen3-asr-0.6b-mlx-q8-g64
+```
+
+Then make Handy able to find a Python executable that can import `mlx_qwen3_asr`. Either set:
+
+```bash
+HANDY_QWEN3_MLX_PYTHON=/path/to/python
+```
+
+or create a `.handy-python` file inside the model directory containing the Python executable path.
+
+On macOS, the model directory is typically:
+
+```text
+~/Library/Application Support/com.pais.handy/models/qwen3-asr-0.6b-mlx-q8-g64
+```
+
 ## Why Handy?
 
 Handy was created to fill the gap for a truly open source, extensible speech-to-text tool. As stated on [handy.computer](https://handy.computer):
@@ -30,6 +60,7 @@ The process is entirely local:
 - Transcription uses your choice of models:
   - **Whisper models** (Small/Medium/Turbo/Large) with GPU acceleration when available
   - **Parakeet V3** - CPU-optimized model with excellent performance and automatic language detection
+  - **Qwen3 ASR 0.6B 8-bit MLX** - experimental fork-only path for fast Korean-focused dictation on Apple Silicon
 - Works on Windows, macOS, and Linux
 
 ## Quick Start
