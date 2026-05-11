@@ -1,12 +1,8 @@
-# Handy
+# Handy Qwen3 MLX Korean ASR Fork
 
-[![Discord](https://img.shields.io/badge/Discord-%235865F2.svg?style=for-the-badge&logo=discord&logoColor=white)](https://discord.com/invite/WVBeWsNXK4)
+> This fork is currently focused on **macOS Apple Silicon only**. The upstream Handy app remains cross-platform, but this fork's Qwen3 MLX ASR path depends on Apple's MLX runtime and is intended for local Korean dictation on M-series Macs.
 
-**A free, open source, and extensible speech-to-text application that works completely offline.**
-
-Handy is a cross-platform desktop application that provides simple, privacy-focused speech transcription. Press a shortcut, speak, and have your words appear in any text field. This happens on your own computer without sending any information to the cloud.
-
-## Fork Notes: Korean Qwen3 MLX ASR
+## What's Different In This Fork
 
 This fork adds an experimental local ASR path focused on faster Korean dictation on Apple Silicon.
 
@@ -15,6 +11,10 @@ This fork adds an experimental local ASR path focused on faster Korean dictation
 - Uses a persistent Python worker so `mlx-qwen3-asr` keeps one `Session` loaded instead of reloading model weights for every transcription
 - Passes Korean language hints and Handy custom words as Qwen3 context to improve Korean dictation
 - Leaves the original Whisper, Parakeet, SenseVoice, GigaAM, Canary, and Cohere paths intact
+
+Korean README: [README.ko.md](README.ko.md)
+
+## Qwen3 MLX Setup
 
 The Qwen3 MLX model and Python environment are not bundled in this repository. For local testing, place the MLX model directory at Handy's model location with this name:
 
@@ -35,6 +35,16 @@ On macOS, the model directory is typically:
 ```text
 ~/Library/Application Support/com.pais.handy/models/qwen3-asr-0.6b-mlx-q8-g64
 ```
+
+---
+
+# Upstream Handy
+
+[![Discord](https://img.shields.io/badge/Discord-%235865F2.svg?style=for-the-badge&logo=discord&logoColor=white)](https://discord.com/invite/WVBeWsNXK4)
+
+**A free, open source, and extensible speech-to-text application that works completely offline.**
+
+Handy is a cross-platform desktop application that provides simple, privacy-focused speech transcription. Press a shortcut, speak, and have your words appear in any text field. This happens on your own computer without sending any information to the cloud.
 
 ## Why Handy?
 
@@ -61,13 +71,13 @@ The process is entirely local:
   - **Whisper models** (Small/Medium/Turbo/Large) with GPU acceleration when available
   - **Parakeet V3** - CPU-optimized model with excellent performance and automatic language detection
   - **Qwen3 ASR 0.6B 8-bit MLX** - experimental fork-only path for fast Korean-focused dictation on Apple Silicon
-- Works on Windows, macOS, and Linux
+- Upstream Handy works on Windows, macOS, and Linux. This fork's Qwen3 MLX release path is macOS Apple Silicon only.
 
 ## Quick Start
 
 ### Installation
 
-1. Download the latest release from the [releases page](https://github.com/cjpais/Handy/releases) or the [website](https://handy.computer)
+1. Download this fork's macOS Apple Silicon build from the [fork releases page](https://github.com/kutd/Handy/releases). For upstream builds, use the [original Handy releases page](https://github.com/cjpais/Handy/releases) or the [website](https://handy.computer)
    - **macOS**: Also available via [Homebrew cask](https://formulae.brew.sh/cask/handy): `brew install --cask handy`
    - **Windows**: Also available via [winget](https://github.com/microsoft/winget-pkgs): `winget install cjpais.Handy` \
      **Note:** The Homebrew cask and winget package are not maintained by the Handy developers.
