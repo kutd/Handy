@@ -18,7 +18,14 @@ Korean README: [README.ko.md](README.ko.md)
 
 ## Qwen3 MLX Setup
 
-The Qwen3 MLX models and Python environment are not bundled in this repository. For local testing, place MLX model directories at Handy's model location with these names:
+The Qwen3 MLX model files can be downloaded from inside Handy. They are hosted as public GitHub Release assets:
+
+- [qwen3-asr-0.6b-mlx-q8-g64.tar.gz](https://github.com/kutd/Handy/releases/download/qwen3-mlx-models-v1/qwen3-asr-0.6b-mlx-q8-g64.tar.gz)
+- [qwen3-asr-1.7b-mlx-q4-g64.tar.gz](https://github.com/kutd/Handy/releases/download/qwen3-mlx-models-v1/qwen3-asr-1.7b-mlx-q4-g64.tar.gz)
+
+The Python environment is not bundled. Handy still needs a Python executable that can import `mlx_qwen3_asr`.
+
+For manual local testing, place MLX model directories at Handy's model location with these names:
 
 ```text
 qwen3-asr-0.6b-mlx-q8-g64

@@ -31,6 +31,13 @@ English README: [README.md](README.md)
 
 ## Qwen3 MLX 모델 준비
 
+Qwen3 MLX 모델 파일은 Handy 앱 안에서 다운로드할 수 있습니다. 모델 파일은 공개 GitHub Release 자산으로 호스팅됩니다.
+
+- [qwen3-asr-0.6b-mlx-q8-g64.tar.gz](https://github.com/kutd/Handy/releases/download/qwen3-mlx-models-v1/qwen3-asr-0.6b-mlx-q8-g64.tar.gz)
+- [qwen3-asr-1.7b-mlx-q4-g64.tar.gz](https://github.com/kutd/Handy/releases/download/qwen3-mlx-models-v1/qwen3-asr-1.7b-mlx-q4-g64.tar.gz)
+
+Python 환경은 포함되어 있지 않습니다. Handy가 `mlx_qwen3_asr`를 import할 수 있는 Python 실행 파일은 별도로 준비해야 합니다.
+
 Handy의 모델 폴더 안에 Qwen3 MLX 모델 디렉터리를 아래 이름으로 배치합니다.
 
 ```text
