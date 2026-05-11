@@ -33,8 +33,8 @@ English README: [README.md](README.md)
 
 Qwen3 MLX 모델 파일은 Handy 앱 안에서 다운로드할 수 있습니다. 모델 파일은 공개 GitHub Release 자산으로 호스팅됩니다.
 
-- [qwen3-asr-0.6b-mlx-q8-g64.tar.gz](https://github.com/kutd/Handy/releases/download/qwen3-mlx-models-v1/qwen3-asr-0.6b-mlx-q8-g64.tar.gz)
-- [qwen3-asr-1.7b-mlx-q4-g64.tar.gz](https://github.com/kutd/Handy/releases/download/qwen3-mlx-models-v1/qwen3-asr-1.7b-mlx-q4-g64.tar.gz)
+- [qwen3-asr-0.6b-mlx-q8-g64.tar.gz](https://github.com/kutd/Handy/releases/download/v0.8.3-qwen3-mlx-ko.4/qwen3-asr-0.6b-mlx-q8-g64.tar.gz)
+- [qwen3-asr-1.7b-mlx-q4-g64.tar.gz](https://github.com/kutd/Handy/releases/download/v0.8.3-qwen3-mlx-ko.4/qwen3-asr-1.7b-mlx-q4-g64.tar.gz)
 
 Handy는 `uv`를 함께 포함하며, 첫 사용 시 Qwen3 MLX 전용 Python 런타임을 자동으로 만듭니다. 이 런타임에는 `mlx-qwen3-asr==0.3.3`이 설치되며 위치는 다음과 같습니다.
 
