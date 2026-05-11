@@ -507,6 +507,38 @@ impl ModelManager {
             },
         );
 
+        available_models.insert(
+            "qwen3-mlx-1.7b-4bit".to_string(),
+            ModelInfo {
+                id: "qwen3-mlx-1.7b-4bit".to_string(),
+                name: "Qwen3 ASR 1.7B 4-bit MLX".to_string(),
+                description: "Accuracy-first multilingual ASR via a persistent MLX session. Uses Korean language and context hints.".to_string(),
+                filename: "qwen3-asr-1.7b-mlx-q4-g64".to_string(),
+                url: None,
+                sha256: None,
+                size_mb: 1230,
+                is_downloaded: false,
+                is_downloading: false,
+                partial_size: 0,
+                is_directory: true,
+                engine_type: EngineType::Qwen3Mlx,
+                accuracy_score: 0.94,
+                speed_score: 0.72,
+                supports_translation: false,
+                is_recommended: false,
+                supported_languages: vec![
+                    "en".to_string(),
+                    "zh".to_string(),
+                    "zh-Hans".to_string(),
+                    "zh-Hant".to_string(),
+                    "ja".to_string(),
+                    "ko".to_string(),
+                ],
+                supports_language_selection: true,
+                is_custom: false,
+            },
+        );
+
         // GigaAM v3 supported languages
         let gigaam_languages: Vec<String> = vec!["ru"].into_iter().map(String::from).collect();
 

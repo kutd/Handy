@@ -6,7 +6,9 @@
 
 This fork adds an experimental local ASR path focused on faster Korean dictation on Apple Silicon.
 
-- Adds a new model option: **Qwen3 ASR 0.6B 8-bit MLX** (`qwen3-mlx-0.6b-8bit`)
+- Adds Qwen3 MLX model options:
+  - **Qwen3 ASR 0.6B 8-bit MLX** (`qwen3-mlx-0.6b-8bit`) for faster dictation
+  - **Qwen3 ASR 1.7B 4-bit MLX** (`qwen3-mlx-1.7b-4bit`) for higher accuracy with more latency and memory use
 - Keeps Handy's existing VAD and recording flow, then sends finalized audio to Qwen3 ASR
 - Uses a persistent Python worker so `mlx-qwen3-asr` keeps one `Session` loaded instead of reloading model weights for every transcription
 - Passes Korean language hints and Handy custom words as Qwen3 context to improve Korean dictation
@@ -16,11 +18,14 @@ Korean README: [README.ko.md](README.ko.md)
 
 ## Qwen3 MLX Setup
 
-The Qwen3 MLX model and Python environment are not bundled in this repository. For local testing, place the MLX model directory at Handy's model location with this name:
+The Qwen3 MLX models and Python environment are not bundled in this repository. For local testing, place MLX model directories at Handy's model location with these names:
 
 ```text
 qwen3-asr-0.6b-mlx-q8-g64
+qwen3-asr-1.7b-mlx-q4-g64
 ```
+
+The 1.7B 4-bit directory should use a `mlx-qwen3-asr`-compatible 4-bit, group-size-64 conversion of `Qwen/Qwen3-ASR-1.7B`.
 
 Then make Handy able to find a Python executable that can import `mlx_qwen3_asr`. Either set:
 
@@ -34,6 +39,7 @@ On macOS, the model directory is typically:
 
 ```text
 ~/Library/Application Support/com.pais.handy/models/qwen3-asr-0.6b-mlx-q8-g64
+~/Library/Application Support/com.pais.handy/models/qwen3-asr-1.7b-mlx-q4-g64
 ```
 
 ---
@@ -71,6 +77,7 @@ The process is entirely local:
   - **Whisper models** (Small/Medium/Turbo/Large) with GPU acceleration when available
   - **Parakeet V3** - CPU-optimized model with excellent performance and automatic language detection
   - **Qwen3 ASR 0.6B 8-bit MLX** - experimental fork-only path for fast Korean-focused dictation on Apple Silicon
+  - **Qwen3 ASR 1.7B 4-bit MLX** - experimental fork-only path for accuracy-first Korean-focused dictation on Apple Silicon
 - Upstream Handy works on Windows, macOS, and Linux. This fork's Qwen3 MLX release path is macOS Apple Silicon only.
 
 ## Quick Start
