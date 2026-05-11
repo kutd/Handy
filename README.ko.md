@@ -38,6 +38,8 @@ Qwen3 MLX 모델 파일은 Handy 앱 안에서 다운로드할 수 있습니다.
 
 Python 환경은 포함되어 있지 않습니다. Handy가 `mlx_qwen3_asr`를 import할 수 있는 Python 실행 파일은 별도로 준비해야 합니다.
 
+Qwen3-ASR 모델 계열은 Hugging Face에서 Apache License 2.0 메타데이터로 공개되어 있습니다. 이 포크의 모델 tarball에는 출처와 MLX/양자화 재패키징 내용을 기록한 `LICENSE`와 `NOTICE` 파일을 포함했습니다.
+
 Handy의 모델 폴더 안에 Qwen3 MLX 모델 디렉터리를 아래 이름으로 배치합니다.
 
 ```text

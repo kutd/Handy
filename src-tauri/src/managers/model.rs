@@ -484,7 +484,7 @@ impl ModelManager {
                 filename: "qwen3-asr-0.6b-mlx-q8-g64".to_string(),
                 url: Some("https://github.com/kutd/Handy/releases/download/qwen3-mlx-models-v1/qwen3-asr-0.6b-mlx-q8-g64.tar.gz".to_string()),
                 sha256: Some(
-                    "dce14383b874a91741e020c0867ae2bb3af9deb4d9eccc04b48922e2a0f5c9fc".to_string(),
+                    "af96f36bd0b6482b237befa441cd951ef3b4b790669deb5dd715c7d312a6307f".to_string(),
                 ),
                 size_mb: 959,
                 is_downloaded: false,
@@ -518,7 +518,7 @@ impl ModelManager {
                 filename: "qwen3-asr-1.7b-mlx-q4-g64".to_string(),
                 url: Some("https://github.com/kutd/Handy/releases/download/qwen3-mlx-models-v1/qwen3-asr-1.7b-mlx-q4-g64.tar.gz".to_string()),
                 sha256: Some(
-                    "5d301c2ef3b77c41409cf821e6fe3483889091de5268ef23fae8991cd0f560ab".to_string(),
+                    "8ed571e4f49d316ebb96398d021a5a84e051dff2d278b1f09b1117252a5276e3".to_string(),
                 ),
                 size_mb: 1230,
                 is_downloaded: false,

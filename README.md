@@ -25,6 +25,8 @@ The Qwen3 MLX model files can be downloaded from inside Handy. They are hosted a
 
 The Python environment is not bundled. Handy still needs a Python executable that can import `mlx_qwen3_asr`.
 
+The Qwen3-ASR model family is published with Apache License 2.0 metadata on Hugging Face. The model tarballs in this fork include `LICENSE` and `NOTICE` files that preserve attribution and document the MLX/quantization repackaging.
+
 For manual local testing, place MLX model directories at Handy's model location with these names:
 
 ```text
