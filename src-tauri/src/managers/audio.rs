@@ -580,7 +580,7 @@ fn run_qwen_live_preview(
     app: tauri::AppHandle,
     rx: mpsc::Receiver<Vec<f32>>,
 ) -> Result<(), anyhow::Error> {
-    const LIVE_FEED_SAMPLES: usize = WHISPER_SAMPLE_RATE / 2;
+    const LIVE_FEED_SAMPLES: usize = WHISPER_SAMPLE_RATE / 4;
 
     let tm = Arc::clone(&app.state::<Arc<TranscriptionManager>>());
     tm.start_qwen_live_stream()?;

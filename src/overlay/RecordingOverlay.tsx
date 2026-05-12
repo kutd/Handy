@@ -98,6 +98,16 @@ const RecordingOverlay: React.FC = () => {
   const unstableText = stablePrefix
     ? liveText.slice(stablePrefix.length).trimStart()
     : liveText;
+  const livePreview = liveText && (
+    <div className="live-preview" title={liveText}>
+      {stablePrefix && (
+        <span className="live-preview-stable">{stablePrefix}</span>
+      )}
+      <span className="live-preview-unstable">
+        {stablePrefix ? unstableText : liveText}
+      </span>
+    </div>
+  );
 
   return (
     <div
@@ -122,23 +132,18 @@ const RecordingOverlay: React.FC = () => {
                 />
               ))}
             </div>
-            {liveText && (
-              <div className="live-preview" title={liveText}>
-                {stablePrefix && (
-                  <span className="live-preview-stable">{stablePrefix}</span>
-                )}
-                <span className="live-preview-unstable">
-                  {stablePrefix ? unstableText : liveText}
-                </span>
-              </div>
-            )}
+            {livePreview}
           </>
         )}
         {state === "transcribing" && (
-          <div className="transcribing-text">{t("overlay.transcribing")}</div>
+          livePreview || (
+            <div className="transcribing-text">{t("overlay.transcribing")}</div>
+          )
         )}
         {state === "processing" && (
-          <div className="transcribing-text">{t("overlay.processing")}</div>
+          livePreview || (
+            <div className="transcribing-text">{t("overlay.processing")}</div>
+          )
         )}
       </div>
 

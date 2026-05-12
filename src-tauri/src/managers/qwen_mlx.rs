@@ -179,12 +179,12 @@ impl QwenMlxEngine {
             "id": request_id,
             "language": language,
             "context": context,
-            "chunk_size_sec": 2.0,
+            "chunk_size_sec": 0.8,
             "max_context_sec": 30.0,
-            "finalization_mode": "accuracy",
+            "finalization_mode": "latency",
             "endpointing_mode": "fixed",
-            "unfixed_chunk_num": 2,
-            "unfixed_token_num": 5,
+            "unfixed_chunk_num": 1,
+            "unfixed_token_num": 4,
         });
 
         let response = self.send_json_request(&request)?;

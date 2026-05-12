@@ -600,12 +600,19 @@ impl ShortcutAction for TranscribeAction {
                             }
 
                             if processed.final_text.is_empty() {
+                                utils::emit_live_transcription_update(&ah, "", "", true);
                                 utils::hide_recording_overlay(&ah);
                                 change_tray_icon(&ah, TrayIconState::Idle);
                             } else {
                                 let ah_clone = ah.clone();
                                 let paste_time = Instant::now();
                                 let final_text = processed.final_text;
+                                utils::emit_live_transcription_update(
+                                    &ah,
+                                    &final_text,
+                                    &final_text,
+                                    true,
+                                );
                                 ah.run_on_main_thread(move || {
                                     match utils::paste(final_text, ah_clone.clone()) {
                                         Ok(()) => debug!(
