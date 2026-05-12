@@ -480,7 +480,7 @@ impl ModelManager {
             ModelInfo {
                 id: "qwen3-mlx-0.6b-8bit".to_string(),
                 name: "Qwen3 ASR 0.6B 8-bit MLX".to_string(),
-                description: "Fast multilingual ASR via a persistent MLX session. Strong Korean accuracy with context hints.".to_string(),
+                description: "Fast multilingual ASR via a persistent MLX session. Strong Korean accuracy with language and vocabulary hints.".to_string(),
                 filename: "qwen3-asr-0.6b-mlx-q8-g64".to_string(),
                 url: Some("https://github.com/kutd/Handy/releases/download/v0.8.3-qwen3-mlx-ko.4/qwen3-asr-0.6b-mlx-q8-g64.tar.gz".to_string()),
                 sha256: Some(
@@ -514,7 +514,7 @@ impl ModelManager {
             ModelInfo {
                 id: "qwen3-mlx-1.7b-4bit".to_string(),
                 name: "Qwen3 ASR 1.7B 4-bit MLX".to_string(),
-                description: "Accuracy-first multilingual ASR via a persistent MLX session. Uses Korean language and context hints.".to_string(),
+                description: "Accuracy-first multilingual ASR via a persistent MLX session. Uses Korean language and vocabulary hints.".to_string(),
                 filename: "qwen3-asr-1.7b-mlx-q4-g64".to_string(),
                 url: Some("https://github.com/kutd/Handy/releases/download/v0.8.3-qwen3-mlx-ko.4/qwen3-asr-1.7b-mlx-q4-g64.tar.gz".to_string()),
                 sha256: Some(

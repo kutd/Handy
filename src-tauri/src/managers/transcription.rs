@@ -608,7 +608,9 @@ impl TranscriptionManager {
                         let language = qwen3_language_hint(&validated_language);
                         let context =
                             build_qwen3_context(&settings.custom_words, &validated_language);
-                        qwen_mlx_engine.transcribe(&audio, language.as_deref(), context.as_str())
+                        qwen_mlx_engine
+                            .transcribe(&audio, language.as_deref(), context.as_str())
+                            .map(|text| remove_qwen3_context_leak(&text))
                     }
                     LoadedEngine::GigaAM(gigaam_engine) => gigaam_engine
                         .transcribe(&audio, &TranscribeOptions::default())
@@ -788,11 +790,8 @@ fn qwen3_language_hint(language: &str) -> Option<String> {
     }
 }
 
-fn build_qwen3_context(custom_words: &[String], language: &str) -> String {
+fn build_qwen3_context(custom_words: &[String], _language: &str) -> String {
     let mut parts = Vec::new();
-    if language == "ko" || language == "auto" {
-        parts.push("핸디 한국어 받아쓰기 회의 메모 일정 연락 숫자 고유명사".to_string());
-    }
     parts.extend(
         custom_words
             .iter()
@@ -801,6 +800,105 @@ fn build_qwen3_context(custom_words: &[String], language: &str) -> String {
             .map(ToString::to_string),
     );
     parts.join(" ")
+}
+
+fn remove_qwen3_context_leak(text: &str) -> String {
+    const LEGACY_KOREAN_CONTEXT_HINT: &str =
+        "핸디 한국어 받아쓰기 회의 메모 일정 연락 숫자 고유명사";
+
+    let mut cleaned = text.trim().to_string();
+    for _ in 0..2 {
+        let Some(next) = remove_exact_phrase_once(&cleaned, LEGACY_KOREAN_CONTEXT_HINT) else {
+            break;
+        };
+        cleaned = next;
+    }
+    cleaned
+}
+
+fn remove_exact_phrase_once(text: &str, phrase: &str) -> Option<String> {
+    let trimmed = text.trim();
+    if trimmed == phrase {
+        return Some(String::new());
+    }
+
+    if let Some(prefix) = trimmed.strip_prefix(phrase) {
+        let prefix =
+            prefix.trim_start_matches(|c: char| c.is_whitespace() || is_sentence_separator(c));
+        return Some(prefix.trim().to_string());
+    }
+
+    let without_trailing_punctuation =
+        trimmed.trim_end_matches(|c: char| c.is_whitespace() || is_sentence_separator(c));
+    let suffix = without_trailing_punctuation.strip_suffix(phrase)?;
+    Some(
+        suffix
+            .trim_end_matches(char::is_whitespace)
+            .trim_end_matches(is_phrase_separator_before_suffix)
+            .trim()
+            .to_string(),
+    )
+}
+
+fn is_sentence_separator(c: char) -> bool {
+    matches!(
+        c,
+        '.' | ',' | ':' | ';' | '-' | '!' | '?' | '。' | '、' | '，' | '！' | '？'
+    )
+}
+
+fn is_phrase_separator_before_suffix(c: char) -> bool {
+    matches!(c, ',' | ':' | ';' | '-' | '、' | '，')
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn qwen_context_uses_only_custom_words() {
+        let custom_words = vec!["  코덱스  ".to_string(), String::new(), "Handy".to_string()];
+
+        assert_eq!(build_qwen3_context(&custom_words, "ko"), "코덱스 Handy");
+        assert_eq!(build_qwen3_context(&[], "ko"), "");
+        assert_eq!(build_qwen3_context(&[], "auto"), "");
+    }
+
+    #[test]
+    fn qwen_context_leak_removes_legacy_hint_prefix() {
+        let text = "핸디 한국어 받아쓰기 회의 메모 일정 연락 숫자 고유명사. 지금 회의 내용을 받아쓰고 있습니다.";
+
+        assert_eq!(
+            remove_qwen3_context_leak(text),
+            "지금 회의 내용을 받아쓰고 있습니다."
+        );
+    }
+
+    #[test]
+    fn qwen_context_leak_removes_legacy_hint_suffix() {
+        let text = "지금 회의 내용을 받아쓰고 있습니다. 핸디 한국어 받아쓰기 회의 메모 일정 연락 숫자 고유명사.";
+
+        assert_eq!(
+            remove_qwen3_context_leak(text),
+            "지금 회의 내용을 받아쓰고 있습니다."
+        );
+    }
+
+    #[test]
+    fn qwen_context_leak_removes_legacy_hint_only() {
+        assert_eq!(
+            remove_qwen3_context_leak("핸디 한국어 받아쓰기 회의 메모 일정 연락 숫자 고유명사"),
+            ""
+        );
+    }
+
+    #[test]
+    fn qwen_context_leak_does_not_remove_middle_text() {
+        let text =
+            "오늘은 핸디 한국어 받아쓰기 회의 메모 일정 연락 숫자 고유명사 테스트를 했습니다.";
+
+        assert_eq!(remove_qwen3_context_leak(text), text);
+    }
 }
 
 /// Apply the user's accelerator preferences to the transcribe-rs global atomics.

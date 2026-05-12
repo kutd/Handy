@@ -11,7 +11,7 @@ This fork adds an experimental local ASR path focused on faster Korean dictation
   - **Qwen3 ASR 1.7B 4-bit MLX** (`qwen3-mlx-1.7b-4bit`) for higher accuracy with more latency and memory use
 - Keeps Handy's existing VAD and recording flow, then sends finalized audio to Qwen3 ASR
 - Uses a persistent Python worker so `mlx-qwen3-asr` keeps one `Session` loaded instead of reloading model weights for every transcription
-- Passes Korean language hints and Handy custom words as Qwen3 context to improve Korean dictation
+- Passes Korean as the Qwen3 language hint and uses Handy custom words as the optional Qwen3 context
 - Leaves the original Whisper, Parakeet, SenseVoice, GigaAM, Canary, and Cohere paths intact
 
 Korean README: [README.ko.md](README.ko.md)

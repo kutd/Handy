@@ -15,7 +15,7 @@ English README: [README.md](README.md)
 - 녹음이 끝난 오디오를 Qwen3 ASR MLX worker로 전달
 - Python worker를 상시 실행해 `mlx-qwen3-asr`의 `Session`을 재사용
 - 매번 모델을 다시 불러오지 않아 짧은 한국어 받아쓰기 응답 속도를 줄이는 구조
-- 한국어 언어 힌트와 Handy 사용자 지정 단어를 Qwen3 context로 전달
+- Qwen3 언어 힌트는 한국어로 지정하고, Handy 사용자 지정 단어만 선택적으로 Qwen3 context로 전달
 - 기존 Whisper, Parakeet, SenseVoice, GigaAM, Canary, Cohere 경로는 그대로 유지
 
 ## 릴리즈
