@@ -806,49 +806,26 @@ fn remove_qwen3_context_leak(text: &str) -> String {
     const LEGACY_KOREAN_CONTEXT_HINT: &str =
         "핸디 한국어 받아쓰기 회의 메모 일정 연락 숫자 고유명사";
 
-    let mut cleaned = text.trim().to_string();
-    for _ in 0..2 {
-        let Some(next) = remove_exact_phrase_once(&cleaned, LEGACY_KOREAN_CONTEXT_HINT) else {
-            break;
-        };
-        cleaned = next;
+    if text_matches_qwen3_context_hint(text, LEGACY_KOREAN_CONTEXT_HINT) {
+        String::new()
+    } else {
+        text.trim().to_string()
     }
-    cleaned
 }
 
-fn remove_exact_phrase_once(text: &str, phrase: &str) -> Option<String> {
-    let trimmed = text.trim();
-    if trimmed == phrase {
-        return Some(String::new());
-    }
-
-    if let Some(prefix) = trimmed.strip_prefix(phrase) {
-        let prefix =
-            prefix.trim_start_matches(|c: char| c.is_whitespace() || is_sentence_separator(c));
-        return Some(prefix.trim().to_string());
-    }
-
-    let without_trailing_punctuation =
-        trimmed.trim_end_matches(|c: char| c.is_whitespace() || is_sentence_separator(c));
-    let suffix = without_trailing_punctuation.strip_suffix(phrase)?;
-    Some(
-        suffix
-            .trim_end_matches(char::is_whitespace)
-            .trim_end_matches(is_phrase_separator_before_suffix)
-            .trim()
-            .to_string(),
-    )
+fn text_matches_qwen3_context_hint(text: &str, hint: &str) -> bool {
+    trim_context_hint_edges(text) == hint
 }
 
-fn is_sentence_separator(c: char) -> bool {
+fn trim_context_hint_edges(text: &str) -> &str {
+    text.trim_matches(|c: char| c.is_whitespace() || is_context_hint_edge_punctuation(c))
+}
+
+fn is_context_hint_edge_punctuation(c: char) -> bool {
     matches!(
         c,
         '.' | ',' | ':' | ';' | '-' | '!' | '?' | '。' | '、' | '，' | '！' | '？'
     )
-}
-
-fn is_phrase_separator_before_suffix(c: char) -> bool {
-    matches!(c, ',' | ':' | ';' | '-' | '、' | '，')
 }
 
 #[cfg(test)]
@@ -865,31 +842,33 @@ mod tests {
     }
 
     #[test]
-    fn qwen_context_leak_removes_legacy_hint_prefix() {
-        let text = "핸디 한국어 받아쓰기 회의 메모 일정 연락 숫자 고유명사. 지금 회의 내용을 받아쓰고 있습니다.";
-
-        assert_eq!(
-            remove_qwen3_context_leak(text),
-            "지금 회의 내용을 받아쓰고 있습니다."
-        );
-    }
-
-    #[test]
-    fn qwen_context_leak_removes_legacy_hint_suffix() {
-        let text = "지금 회의 내용을 받아쓰고 있습니다. 핸디 한국어 받아쓰기 회의 메모 일정 연락 숫자 고유명사.";
-
-        assert_eq!(
-            remove_qwen3_context_leak(text),
-            "지금 회의 내용을 받아쓰고 있습니다."
-        );
-    }
-
-    #[test]
     fn qwen_context_leak_removes_legacy_hint_only() {
         assert_eq!(
             remove_qwen3_context_leak("핸디 한국어 받아쓰기 회의 메모 일정 연락 숫자 고유명사"),
             ""
         );
+    }
+
+    #[test]
+    fn qwen_context_leak_removes_punctuated_legacy_hint_only() {
+        assert_eq!(
+            remove_qwen3_context_leak(" 핸디 한국어 받아쓰기 회의 메모 일정 연락 숫자 고유명사. "),
+            ""
+        );
+    }
+
+    #[test]
+    fn qwen_context_leak_keeps_text_after_legacy_hint() {
+        let text = "핸디 한국어 받아쓰기 회의 메모 일정 연락 숫자 고유명사. 지금 회의 내용을 받아쓰고 있습니다.";
+
+        assert_eq!(remove_qwen3_context_leak(text), text);
+    }
+
+    #[test]
+    fn qwen_context_leak_keeps_text_before_legacy_hint() {
+        let text = "지금 회의 내용을 받아쓰고 있습니다. 핸디 한국어 받아쓰기 회의 메모 일정 연락 숫자 고유명사.";
+
+        assert_eq!(remove_qwen3_context_leak(text), text);
     }
 
     #[test]
