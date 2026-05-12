@@ -1,5 +1,6 @@
 use crate::settings::{get_settings, write_settings};
 use anyhow::Result;
+use bzip2::read::BzDecoder;
 use flate2::read::GzDecoder;
 use futures_util::StreamExt;
 use log::{debug, info, warn};
@@ -25,6 +26,7 @@ pub enum EngineType {
     MoonshineStreaming,
     SenseVoice,
     Qwen3Mlx,
+    SherpaOnnx,
     GigaAM,
     Canary,
     Cohere,
@@ -539,6 +541,36 @@ impl ModelManager {
                     "ko".to_string(),
                 ],
                 supports_language_selection: true,
+                is_custom: false,
+            },
+        );
+
+        available_models.insert(
+            "sherpa-onnx-zipformer-ko-streaming".to_string(),
+            ModelInfo {
+                id: "sherpa-onnx-zipformer-ko-streaming".to_string(),
+                name: "Korean Zipformer Streaming".to_string(),
+                description:
+                    "Korean-only true streaming ASR. Very low latency, lower accuracy than Qwen3."
+                        .to_string(),
+                filename: "sherpa-onnx-streaming-zipformer-korean-2024-06-16".to_string(),
+                url: Some("https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-streaming-zipformer-korean-2024-06-16.tar.bz2".to_string()),
+                sha256: Some(
+                    "e346a5882a409650472be17326237e24df7bf409db6b4a8a52e1a61422bf2500"
+                        .to_string(),
+                ),
+                size_mb: 399,
+                is_downloaded: false,
+                is_downloading: false,
+                partial_size: 0,
+                is_directory: true,
+                engine_type: EngineType::SherpaOnnx,
+                accuracy_score: 0.62,
+                speed_score: 0.98,
+                supports_translation: false,
+                is_recommended: false,
+                supported_languages: vec!["ko".to_string()],
+                supports_language_selection: false,
                 is_custom: false,
             },
         );
@@ -1302,10 +1334,15 @@ impl ModelManager {
             // Create temporary extraction directory
             fs::create_dir_all(&temp_extract_dir)?;
 
-            // Open the downloaded tar.gz file
-            let tar_gz = File::open(&partial_path)?;
-            let tar = GzDecoder::new(tar_gz);
-            let mut archive = Archive::new(tar);
+            // Open the downloaded tar archive. Most bundled models are .tar.gz,
+            // while sherpa-onnx publishes this Korean streaming model as .tar.bz2.
+            let archive_file = File::open(&partial_path)?;
+            let archive_reader: Box<dyn Read> = if url.ends_with(".tar.bz2") {
+                Box::new(BzDecoder::new(archive_file))
+            } else {
+                Box::new(GzDecoder::new(archive_file))
+            };
+            let mut archive = Archive::new(archive_reader);
 
             // Extract to the temporary directory first
             archive.unpack(&temp_extract_dir).map_err(|e| {

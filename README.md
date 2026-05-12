@@ -13,6 +13,7 @@ This fork adds an experimental local ASR path focused on faster Korean dictation
 - Uses a persistent Python worker so `mlx-qwen3-asr` keeps one `Session` loaded instead of reloading model weights for every transcription
 - Passes Korean as the Qwen3 language hint and uses Handy custom words as the optional Qwen3 context
 - Adds an experimental local Qwen3 MLX live preview while recording. The overlay re-renders the current streaming text so Qwen's unstable tail corrections are visible before the final transcription.
+- Adds **Korean Zipformer Streaming** (`sherpa-onnx-zipformer-ko-streaming`) via sherpa-onnx for very low-latency Korean-only live transcription. This is faster and more streaming-native than Qwen3, but less accurate.
 - Leaves the original Whisper, Parakeet, SenseVoice, GigaAM, Canary, and Cohere paths intact
 
 Rollback reference: `stable-before-live-qwen-preview` points to the last release state before live Qwen preview was added.
@@ -61,6 +62,20 @@ On macOS, the model directory is typically:
 ~/Library/Application Support/com.pais.handy/models/qwen3-asr-0.6b-mlx-q8-g64
 ~/Library/Application Support/com.pais.handy/models/qwen3-asr-1.7b-mlx-q4-g64
 ```
+
+## Sherpa-Onnx Korean Zipformer Setup
+
+Handy can also download the Korean streaming Zipformer model published by k2-fsa/sherpa-onnx:
+
+- [sherpa-onnx-streaming-zipformer-korean-2024-06-16.tar.bz2](https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-streaming-zipformer-korean-2024-06-16.tar.bz2)
+
+The app verifies the archive SHA256 and extracts the `.tar.bz2` model automatically. On first use, Handy creates a private sherpa-onnx runtime here:
+
+```text
+~/Library/Application Support/com.pais.handy/models/.sherpa-onnx-runtime
+```
+
+It installs `sherpa-onnx==1.13.1`. To use your own environment instead, set `HANDY_SHERPA_ONNX_PYTHON` to a Python executable that can import `sherpa_onnx`.
 
 ---
 

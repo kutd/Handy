@@ -77,6 +77,10 @@
         "name": "SenseVoice",
         "description": "Very fast. Chinese, English, Japanese, Korean, Cantonese."
       },
+      "sherpa-onnx-zipformer-ko-streaming": {
+        "name": "Korean Zipformer Streaming",
+        "description": "Korean-only true streaming ASR. Very low latency, lower accuracy than Qwen3."
+      },
       "gigaam-v3-e2e-ctc": {
         "name": "GigaAM v3",
         "description": "Russian speech recognition. Fast and accurate."

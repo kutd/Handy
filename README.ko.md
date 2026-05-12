@@ -17,6 +17,8 @@ English README: [README.md](README.md)
 - 매번 모델을 다시 불러오지 않아 짧은 한국어 받아쓰기 응답 속도를 줄이는 구조
 - Qwen3 언어 힌트는 한국어로 지정하고, Handy 사용자 지정 단어만 선택적으로 Qwen3 context로 전달
 - 녹음 중 Qwen3 MLX 실시간 미리보기를 overlay에 표시합니다. Qwen 스트리밍의 미확정 꼬리 구간이 바뀌면 overlay 텍스트도 즉시 다시 렌더링됩니다.
+- **Korean Zipformer Streaming** 모델 옵션 추가: `sherpa-onnx-zipformer-ko-streaming`
+- sherpa-onnx 기반 한국어 전용 진짜 스트리밍 모델로, Qwen3보다 정확도는 낮지만 지연이 매우 짧습니다.
 - 기존 Whisper, Parakeet, SenseVoice, GigaAM, Canary, Cohere 경로는 그대로 유지
 
 롤백 기준: `stable-before-live-qwen-preview` 태그는 Qwen 실시간 미리보기 추가 직전의 안정 상태를 가리킵니다.
@@ -28,8 +30,8 @@ English README: [README.md](README.md)
 주의할 점:
 
 - Qwen3 MLX 모델 파일은 릴리즈에 포함되어 있지 않습니다.
-- Python 환경도 포함되어 있지 않습니다.
-- 로컬에서 `mlx_qwen3_asr`를 import할 수 있는 Python을 준비해야 합니다.
+- Qwen3 MLX와 sherpa-onnx Python 런타임은 앱이 첫 사용 시 자동으로 만듭니다.
+- 최초 런타임 생성에는 인터넷 연결이 필요합니다.
 - 현재 빌드는 실험용이며 Apple 공증을 거친 배포본이 아닙니다.
 
 ## Qwen3 MLX 모델 준비
@@ -81,13 +83,27 @@ HANDY_QWEN3_MLX_PYTHON=/path/to/python
 /path/to/python
 ```
 
+## sherpa-onnx 한국어 Zipformer 모델 준비
+
+Handy 앱 안에서 k2-fsa/sherpa-onnx의 한국어 streaming Zipformer 모델을 다운로드할 수 있습니다.
+
+- [sherpa-onnx-streaming-zipformer-korean-2024-06-16.tar.bz2](https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-streaming-zipformer-korean-2024-06-16.tar.bz2)
+
+앱은 SHA256을 확인한 뒤 `.tar.bz2` 모델을 자동으로 압축 해제합니다. 첫 사용 시 sherpa-onnx 전용 Python 런타임이 아래 위치에 만들어집니다.
+
+```text
+~/Library/Application Support/com.pais.handy/models/.sherpa-onnx-runtime
+```
+
+이 런타임에는 `sherpa-onnx==1.13.1`이 설치됩니다. 직접 준비한 Python 환경을 쓰려면 `sherpa_onnx`를 import할 수 있는 Python 실행 파일을 `HANDY_SHERPA_ONNX_PYTHON` 환경 변수로 지정하면 됩니다.
+
 ## 사용 방법
 
 1. 이 포크의 [Releases](https://github.com/kutd/Handy/releases)에서 macOS Apple Silicon용 DMG를 받습니다.
 2. 앱을 설치하고 실행합니다.
 3. macOS에서 마이크와 손쉬운 사용 권한을 허용합니다.
-4. Qwen3 MLX 모델 디렉터리와 Python 경로를 준비합니다.
-5. Handy 설정에서 `Qwen3 ASR 0.6B 8-bit MLX` 또는 `Qwen3 ASR 1.7B 4-bit MLX` 모델과 한국어를 선택합니다.
+4. 앱 안에서 원하는 Qwen3 MLX 또는 Korean Zipformer Streaming 모델을 다운로드합니다.
+5. Handy 설정에서 `Qwen3 ASR 0.6B 8-bit MLX`, `Qwen3 ASR 1.7B 4-bit MLX`, 또는 `Korean Zipformer Streaming` 모델을 선택합니다.
 6. 단축키를 눌러 한국어 받아쓰기를 테스트합니다.
 
 ## 원본 Handy 소개

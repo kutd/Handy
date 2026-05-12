@@ -305,7 +305,12 @@ impl AudioRecordingManager {
         self.app_handle
             .try_state::<Arc<crate::managers::model::ModelManager>>()
             .and_then(|manager| manager.get_model_info(&settings.selected_model))
-            .map(|info| matches!(info.engine_type, EngineType::Qwen3Mlx))
+            .map(|info| {
+                matches!(
+                    info.engine_type,
+                    EngineType::Qwen3Mlx | EngineType::SherpaOnnx
+                )
+            })
             .unwrap_or(false)
     }
 
@@ -322,8 +327,8 @@ impl AudioRecordingManager {
 
         let app = self.app_handle.clone();
         let handle = std::thread::spawn(move || {
-            if let Err(err) = run_qwen_live_preview(app, rx) {
-                debug!("Qwen live preview stopped: {}", err);
+            if let Err(err) = run_live_preview(app, rx) {
+                debug!("Live transcription preview stopped: {}", err);
             }
         });
         *self.live_preview_handle.lock().unwrap() = Some(handle);
@@ -576,14 +581,14 @@ impl AudioRecordingManager {
     }
 }
 
-fn run_qwen_live_preview(
+fn run_live_preview(
     app: tauri::AppHandle,
     rx: mpsc::Receiver<Vec<f32>>,
 ) -> Result<(), anyhow::Error> {
     const LIVE_FEED_SAMPLES: usize = WHISPER_SAMPLE_RATE / 4;
 
     let tm = Arc::clone(&app.state::<Arc<TranscriptionManager>>());
-    tm.start_qwen_live_stream()?;
+    tm.start_live_stream()?;
 
     let mut pending = Vec::<f32>::with_capacity(LIVE_FEED_SAMPLES * 2);
     let mut last_text = String::new();
@@ -595,7 +600,7 @@ fn run_qwen_live_preview(
             if !has_live_preview_energy(&chunk) {
                 continue;
             }
-            let update = tm.feed_qwen_live_stream(&chunk)?;
+            let update = tm.feed_live_stream(&chunk)?;
             if update.text != last_text {
                 utils::emit_live_transcription_update(
                     &app,
@@ -610,7 +615,7 @@ fn run_qwen_live_preview(
 
     if !pending.is_empty() {
         if has_live_preview_energy(&pending) {
-            if let Ok(update) = tm.feed_qwen_live_stream(&pending) {
+            if let Ok(update) = tm.feed_live_stream(&pending) {
                 if update.text != last_text {
                     utils::emit_live_transcription_update(
                         &app,
@@ -623,7 +628,7 @@ fn run_qwen_live_preview(
         }
     }
 
-    let _ = tm.cancel_qwen_live_stream();
+    let _ = tm.cancel_live_stream();
     Ok(())
 }
 

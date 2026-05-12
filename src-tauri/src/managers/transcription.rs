@@ -1,7 +1,8 @@
 use crate::audio_toolkit::{apply_custom_words, filter_transcription_output};
 use crate::managers::audio::AudioRecordingManager;
 use crate::managers::model::{EngineType, ModelManager};
-use crate::managers::qwen_mlx::{QwenMlxEngine, QwenStreamUpdate};
+use crate::managers::qwen_mlx::QwenMlxEngine;
+use crate::managers::sherpa_onnx::SherpaOnnxEngine;
 use crate::settings::{
     get_settings, ModelUnloadTimeout, OrtAcceleratorSetting, WhisperAcceleratorSetting,
 };
@@ -37,6 +38,12 @@ pub struct ModelStateEvent {
     pub error: Option<String>,
 }
 
+#[derive(Clone, Debug)]
+pub struct LiveStreamUpdate {
+    pub text: String,
+    pub stable_text: String,
+}
+
 enum LoadedEngine {
     Whisper(WhisperEngine),
     Parakeet(ParakeetModel),
@@ -44,6 +51,7 @@ enum LoadedEngine {
     MoonshineStreaming(StreamingModel),
     SenseVoice(SenseVoiceModel),
     Qwen3Mlx(QwenMlxEngine),
+    SherpaOnnx(SherpaOnnxEngine),
     GigaAM(GigaAMModel),
     Canary(CanaryModel),
     Cohere(CohereModel),
@@ -364,6 +372,15 @@ impl TranscriptionManager {
                 })?;
                 LoadedEngine::Qwen3Mlx(engine)
             }
+            EngineType::SherpaOnnx => {
+                let worker_path = self.resolve_sherpa_onnx_worker_path()?;
+                let engine = SherpaOnnxEngine::load(&model_path, &worker_path).map_err(|e| {
+                    let error_msg = format!("Failed to load sherpa-onnx model {}: {}", model_id, e);
+                    emit_loading_failed(&error_msg);
+                    anyhow::anyhow!(error_msg)
+                })?;
+                LoadedEngine::SherpaOnnx(engine)
+            }
             EngineType::GigaAM => {
                 let engine = GigaAMModel::load(&model_path, &Quantization::Int8).map_err(|e| {
                     let error_msg = format!("Failed to load gigaam model {}: {}", model_id, e);
@@ -499,13 +516,14 @@ impl TranscriptionManager {
         }
     }
 
-    pub fn start_qwen_live_stream(&self) -> Result<()> {
+    pub fn start_live_stream(&self) -> Result<()> {
         let model_id = self.ensure_selected_model_loaded()?;
         let settings = get_settings(&self.app_handle);
         let validated_language =
             self.validated_language_for_model(&model_id, &settings.selected_language);
         let language = qwen3_language_hint(&validated_language);
         let context = build_qwen3_context(&settings.custom_words, &validated_language);
+        let hotwords = build_sherpa_hotwords(&settings.custom_words);
 
         let mut engine = self.lock_engine();
         match engine.as_mut() {
@@ -514,15 +532,20 @@ impl TranscriptionManager {
                 self.touch_activity();
                 Ok(())
             }
+            Some(LoadedEngine::SherpaOnnx(sherpa_engine)) => {
+                sherpa_engine.stream_start(&hotwords)?;
+                self.touch_activity();
+                Ok(())
+            }
             _ => Err(anyhow::anyhow!(
-                "Live transcription preview is only available for Qwen3 MLX models"
+                "Live transcription preview is only available for Qwen3 MLX and sherpa-onnx models"
             )),
         }
     }
 
-    pub fn feed_qwen_live_stream(&self, audio: &[f32]) -> Result<QwenStreamUpdate> {
+    pub fn feed_live_stream(&self, audio: &[f32]) -> Result<LiveStreamUpdate> {
         if audio.is_empty() {
-            return Ok(QwenStreamUpdate {
+            return Ok(LiveStreamUpdate {
                 text: String::new(),
                 stable_text: String::new(),
             });
@@ -530,24 +553,40 @@ impl TranscriptionManager {
 
         let mut engine = self.lock_engine();
         let update = match engine.as_mut() {
-            Some(LoadedEngine::Qwen3Mlx(qwen_mlx_engine)) => qwen_mlx_engine.stream_feed(audio)?,
+            Some(LoadedEngine::Qwen3Mlx(qwen_mlx_engine)) => {
+                let update = qwen_mlx_engine.stream_feed(audio)?;
+                LiveStreamUpdate {
+                    text: remove_qwen3_context_leak(&update.text),
+                    stable_text: remove_qwen3_context_leak(&update.stable_text),
+                }
+            }
+            Some(LoadedEngine::SherpaOnnx(sherpa_engine)) => {
+                let update = sherpa_engine.stream_feed(audio)?;
+                LiveStreamUpdate {
+                    text: update.text.trim().to_string(),
+                    stable_text: update.stable_text.trim().to_string(),
+                }
+            }
             _ => {
                 return Err(anyhow::anyhow!(
-                    "Live transcription preview is only available for Qwen3 MLX models"
+                    "Live transcription preview is only available for Qwen3 MLX and sherpa-onnx models"
                 ));
             }
         };
         self.touch_activity();
-        Ok(QwenStreamUpdate {
-            text: remove_qwen3_context_leak(&update.text),
-            stable_text: remove_qwen3_context_leak(&update.stable_text),
-        })
+        Ok(update)
     }
 
-    pub fn cancel_qwen_live_stream(&self) -> Result<()> {
+    pub fn cancel_live_stream(&self) -> Result<()> {
         let mut engine = self.lock_engine();
-        if let Some(LoadedEngine::Qwen3Mlx(qwen_mlx_engine)) = engine.as_mut() {
-            qwen_mlx_engine.stream_cancel()?;
+        match engine.as_mut() {
+            Some(LoadedEngine::Qwen3Mlx(qwen_mlx_engine)) => {
+                qwen_mlx_engine.stream_cancel()?;
+            }
+            Some(LoadedEngine::SherpaOnnx(sherpa_engine)) => {
+                sherpa_engine.stream_cancel()?;
+            }
+            _ => {}
         }
         self.touch_activity();
         Ok(())
@@ -717,6 +756,9 @@ impl TranscriptionManager {
                             .transcribe(&audio, language.as_deref(), context.as_str())
                             .map(|text| remove_qwen3_context_leak(&text))
                     }
+                    LoadedEngine::SherpaOnnx(sherpa_engine) => sherpa_engine
+                        .transcribe(&audio)
+                        .map(|text| text.trim().to_string()),
                     LoadedEngine::GigaAM(gigaam_engine) => gigaam_engine
                         .transcribe(&audio, &TranscribeOptions::default())
                         .map(|result| result.text)
@@ -882,6 +924,32 @@ impl TranscriptionManager {
             resolved.display()
         ))
     }
+
+    fn resolve_sherpa_onnx_worker_path(&self) -> Result<std::path::PathBuf> {
+        let resolved = self
+            .app_handle
+            .path()
+            .resolve(
+                "resources/sherpa_onnx_worker.py",
+                tauri::path::BaseDirectory::Resource,
+            )
+            .map_err(|e| anyhow::anyhow!("Failed to resolve sherpa-onnx worker: {}", e))?;
+
+        if resolved.exists() {
+            return Ok(resolved);
+        }
+
+        let dev_path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("resources/sherpa_onnx_worker.py");
+        if dev_path.exists() {
+            return Ok(dev_path);
+        }
+
+        Err(anyhow::anyhow!(
+            "sherpa-onnx worker script not found at {}",
+            resolved.display()
+        ))
+    }
 }
 
 fn qwen3_language_hint(language: &str) -> Option<String> {
@@ -905,6 +973,15 @@ fn build_qwen3_context(custom_words: &[String], _language: &str) -> String {
             .map(ToString::to_string),
     );
     parts.join(" ")
+}
+
+fn build_sherpa_hotwords(custom_words: &[String]) -> String {
+    custom_words
+        .iter()
+        .map(|word| word.trim())
+        .filter(|word| !word.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 fn remove_qwen3_context_leak(text: &str) -> String {
