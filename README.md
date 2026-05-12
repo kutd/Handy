@@ -12,7 +12,10 @@ This fork adds an experimental local ASR path focused on faster Korean dictation
 - Keeps Handy's existing VAD and recording flow, then sends finalized audio to Qwen3 ASR
 - Uses a persistent Python worker so `mlx-qwen3-asr` keeps one `Session` loaded instead of reloading model weights for every transcription
 - Passes Korean as the Qwen3 language hint and uses Handy custom words as the optional Qwen3 context
+- Adds an experimental local Qwen3 MLX live preview while recording. The overlay re-renders the current streaming text so Qwen's unstable tail corrections are visible before the final transcription.
 - Leaves the original Whisper, Parakeet, SenseVoice, GigaAM, Canary, and Cohere paths intact
+
+Rollback reference: `stable-before-live-qwen-preview` points to the last release state before live Qwen preview was added.
 
 Korean README: [README.ko.md](README.ko.md)
 

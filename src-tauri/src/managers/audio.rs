@@ -1,10 +1,14 @@
 use crate::audio_toolkit::{list_input_devices, vad::SmoothedVad, AudioRecorder, SileroVad};
 use crate::helpers::clamshell;
+use crate::managers::model::EngineType;
+use crate::managers::transcription::TranscriptionManager;
 use crate::settings::{get_settings, AppSettings};
 use crate::utils;
 use log::{debug, error, info};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
+use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 use tauri::Manager;
 
@@ -120,6 +124,7 @@ pub enum MicrophoneMode {
 fn create_audio_recorder(
     vad_path: &str,
     app_handle: &tauri::AppHandle,
+    live_sample_tx: Arc<Mutex<Option<mpsc::Sender<Vec<f32>>>>>,
 ) -> Result<AudioRecorder, anyhow::Error> {
     let silero = SileroVad::new(vad_path, 0.3)
         .map_err(|e| anyhow::anyhow!("Failed to create SileroVad: {}", e))?;
@@ -134,6 +139,14 @@ fn create_audio_recorder(
             let app_handle = app_handle.clone();
             move |levels| {
                 utils::emit_levels(&app_handle, &levels);
+            }
+        })
+        .with_sample_callback({
+            move |samples| {
+                let tx = live_sample_tx.lock().unwrap().clone();
+                if let Some(tx) = tx {
+                    let _ = tx.send(samples);
+                }
             }
         });
 
@@ -153,6 +166,8 @@ pub struct AudioRecordingManager {
     is_recording: Arc<Mutex<bool>>,
     did_mute: Arc<Mutex<bool>>,
     close_generation: Arc<AtomicU64>,
+    live_sample_tx: Arc<Mutex<Option<mpsc::Sender<Vec<f32>>>>>,
+    live_preview_handle: Arc<Mutex<Option<JoinHandle<()>>>>,
 }
 
 impl AudioRecordingManager {
@@ -176,6 +191,8 @@ impl AudioRecordingManager {
             is_recording: Arc::new(Mutex::new(false)),
             did_mute: Arc::new(Mutex::new(false)),
             close_generation: Arc::new(AtomicU64::new(0)),
+            live_sample_tx: Arc::new(Mutex::new(None)),
+            live_preview_handle: Arc::new(Mutex::new(None)),
         };
 
         // Always-on?  Open immediately.
@@ -277,9 +294,46 @@ impl AudioRecordingManager {
             *recorder_opt = Some(create_audio_recorder(
                 vad_path.to_str().unwrap(),
                 &self.app_handle,
+                self.live_sample_tx.clone(),
             )?);
         }
         Ok(())
+    }
+
+    fn selected_model_supports_live_preview(&self) -> bool {
+        let settings = get_settings(&self.app_handle);
+        self.app_handle
+            .try_state::<Arc<crate::managers::model::ModelManager>>()
+            .and_then(|manager| manager.get_model_info(&settings.selected_model))
+            .map(|info| matches!(info.engine_type, EngineType::Qwen3Mlx))
+            .unwrap_or(false)
+    }
+
+    fn start_live_preview(&self) {
+        self.stop_live_preview();
+
+        if !self.selected_model_supports_live_preview() {
+            return;
+        }
+
+        let (tx, rx) = mpsc::channel::<Vec<f32>>();
+        *self.live_sample_tx.lock().unwrap() = Some(tx);
+        utils::emit_live_transcription_update(&self.app_handle, "", "", false);
+
+        let app = self.app_handle.clone();
+        let handle = std::thread::spawn(move || {
+            if let Err(err) = run_qwen_live_preview(app, rx) {
+                debug!("Qwen live preview stopped: {}", err);
+            }
+        });
+        *self.live_preview_handle.lock().unwrap() = Some(handle);
+    }
+
+    fn stop_live_preview(&self) {
+        let _ = self.live_sample_tx.lock().unwrap().take();
+        if let Some(handle) = self.live_preview_handle.lock().unwrap().take() {
+            let _ = handle.join();
+        }
     }
 
     pub fn start_microphone_stream(&self) -> Result<(), anyhow::Error> {
@@ -349,6 +403,7 @@ impl AudioRecordingManager {
             // If still recording, stop first.
             if *self.is_recording.lock().unwrap() {
                 let _ = rec.stop();
+                self.stop_live_preview();
                 *self.is_recording.lock().unwrap() = false;
             }
             let _ = rec.close();
@@ -399,6 +454,7 @@ impl AudioRecordingManager {
             }
 
             if let Some(rec) = self.recorder.lock().unwrap().as_ref() {
+                self.start_live_preview();
                 if rec.start().is_ok() {
                     *self.is_recording.lock().unwrap() = true;
                     *state = RecordingState::Recording {
@@ -407,6 +463,7 @@ impl AudioRecordingManager {
                     debug!("Recording started for binding {binding_id}");
                     return Ok(());
                 }
+                self.stop_live_preview();
             }
             Err("Recorder not available".to_string())
         } else {
@@ -457,6 +514,8 @@ impl AudioRecordingManager {
                     Vec::new()
                 };
 
+                self.stop_live_preview();
+
                 *self.is_recording.lock().unwrap() = false;
 
                 // In on-demand mode, close the mic (lazily if the setting is enabled)
@@ -501,6 +560,8 @@ impl AudioRecordingManager {
                 let _ = rec.stop(); // Discard the result
             }
 
+            self.stop_live_preview();
+
             *self.is_recording.lock().unwrap() = false;
 
             // In on-demand mode, close the mic (lazily if the setting is enabled)
@@ -513,4 +574,65 @@ impl AudioRecordingManager {
             }
         }
     }
+}
+
+fn run_qwen_live_preview(
+    app: tauri::AppHandle,
+    rx: mpsc::Receiver<Vec<f32>>,
+) -> Result<(), anyhow::Error> {
+    const LIVE_FEED_SAMPLES: usize = WHISPER_SAMPLE_RATE / 2;
+
+    let tm = Arc::clone(&app.state::<Arc<TranscriptionManager>>());
+    tm.start_qwen_live_stream()?;
+
+    let mut pending = Vec::<f32>::with_capacity(LIVE_FEED_SAMPLES * 2);
+    let mut last_text = String::new();
+
+    while let Ok(samples) = rx.recv() {
+        pending.extend_from_slice(&samples);
+        while pending.len() >= LIVE_FEED_SAMPLES {
+            let chunk: Vec<f32> = pending.drain(..LIVE_FEED_SAMPLES).collect();
+            if !has_live_preview_energy(&chunk) {
+                continue;
+            }
+            let update = tm.feed_qwen_live_stream(&chunk)?;
+            if update.text != last_text {
+                utils::emit_live_transcription_update(
+                    &app,
+                    &update.text,
+                    &update.stable_text,
+                    false,
+                );
+                last_text = update.text;
+            }
+        }
+    }
+
+    if !pending.is_empty() {
+        if has_live_preview_energy(&pending) {
+            if let Ok(update) = tm.feed_qwen_live_stream(&pending) {
+                if update.text != last_text {
+                    utils::emit_live_transcription_update(
+                        &app,
+                        &update.text,
+                        &update.stable_text,
+                        false,
+                    );
+                }
+            }
+        }
+    }
+
+    let _ = tm.cancel_qwen_live_stream();
+    Ok(())
+}
+
+fn has_live_preview_energy(samples: &[f32]) -> bool {
+    if samples.is_empty() {
+        return false;
+    }
+
+    let sum_squares = samples.iter().map(|sample| sample * sample).sum::<f32>();
+    let rms = (sum_squares / samples.len() as f32).sqrt();
+    rms > 0.002
 }

@@ -12,12 +12,19 @@ import i18n, { syncLanguageFromSettings } from "@/i18n";
 import { getLanguageDirection } from "@/lib/utils/rtl";
 
 type OverlayState = "recording" | "transcribing" | "processing";
+type LiveTranscriptionUpdate = {
+  text: string;
+  stable_text: string;
+  is_final: boolean;
+};
 
 const RecordingOverlay: React.FC = () => {
   const { t } = useTranslation();
   const [isVisible, setIsVisible] = useState(false);
   const [state, setState] = useState<OverlayState>("recording");
   const [levels, setLevels] = useState<number[]>(Array(16).fill(0));
+  const [liveText, setLiveText] = useState("");
+  const [stableText, setStableText] = useState("");
   const smoothedLevelsRef = useRef<number[]>(Array(16).fill(0));
   const direction = getLanguageDirection(i18n.language);
 
@@ -29,12 +36,18 @@ const RecordingOverlay: React.FC = () => {
         await syncLanguageFromSettings();
         const overlayState = event.payload as OverlayState;
         setState(overlayState);
+        if (overlayState === "recording") {
+          setLiveText("");
+          setStableText("");
+        }
         setIsVisible(true);
       });
 
       // Listen for hide-overlay event from Rust
       const unlistenHide = await listen("hide-overlay", () => {
         setIsVisible(false);
+        setLiveText("");
+        setStableText("");
       });
 
       // Listen for mic-level updates
@@ -51,11 +64,21 @@ const RecordingOverlay: React.FC = () => {
         setLevels(smoothed.slice(0, 9));
       });
 
+      const unlistenLive = await listen<LiveTranscriptionUpdate>(
+        "live-transcription-update",
+        (event) => {
+          const update = event.payload;
+          setLiveText(update.text || "");
+          setStableText(update.stable_text || "");
+        },
+      );
+
       // Cleanup function
       return () => {
         unlistenShow();
         unlistenHide();
         unlistenLevel();
+        unlistenLive();
       };
     };
 
@@ -70,6 +93,12 @@ const RecordingOverlay: React.FC = () => {
     }
   };
 
+  const stablePrefix =
+    stableText && liveText.startsWith(stableText) ? stableText : "";
+  const unstableText = stablePrefix
+    ? liveText.slice(stablePrefix.length).trimStart()
+    : liveText;
+
   return (
     <div
       dir={direction}
@@ -79,19 +108,31 @@ const RecordingOverlay: React.FC = () => {
 
       <div className="overlay-middle">
         {state === "recording" && (
-          <div className="bars-container">
-            {levels.map((v, i) => (
-              <div
-                key={i}
-                className="bar"
-                style={{
-                  height: `${Math.min(20, 4 + Math.pow(v, 0.7) * 16)}px`, // Cap at 20px max height
-                  transition: "height 60ms ease-out, opacity 120ms ease-out",
-                  opacity: Math.max(0.2, v * 1.7), // Minimum opacity for visibility
-                }}
-              />
-            ))}
-          </div>
+          <>
+            <div className="bars-container">
+              {levels.map((v, i) => (
+                <div
+                  key={i}
+                  className="bar"
+                  style={{
+                    height: `${Math.min(20, 4 + Math.pow(v, 0.7) * 16)}px`, // Cap at 20px max height
+                    transition: "height 60ms ease-out, opacity 120ms ease-out",
+                    opacity: Math.max(0.2, v * 1.7), // Minimum opacity for visibility
+                  }}
+                />
+              ))}
+            </div>
+            {liveText && (
+              <div className="live-preview" title={liveText}>
+                {stablePrefix && (
+                  <span className="live-preview-stable">{stablePrefix}</span>
+                )}
+                <span className="live-preview-unstable">
+                  {stablePrefix ? unstableText : liveText}
+                </span>
+              </div>
+            )}
+          </>
         )}
         {state === "transcribing" && (
           <div className="transcribing-text">{t("overlay.transcribing")}</div>

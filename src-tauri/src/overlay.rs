@@ -1,6 +1,7 @@
 use crate::input;
 use crate::settings;
 use crate::settings::OverlayPosition;
+use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize};
 
 #[cfg(not(target_os = "macos"))]
@@ -31,8 +32,8 @@ tauri_panel! {
     })
 }
 
-const OVERLAY_WIDTH: f64 = 172.0;
-const OVERLAY_HEIGHT: f64 = 36.0;
+const OVERLAY_WIDTH: f64 = 520.0;
+const OVERLAY_HEIGHT: f64 = 72.0;
 
 #[cfg(target_os = "macos")]
 const OVERLAY_TOP_OFFSET: f64 = 46.0;
@@ -392,5 +393,30 @@ pub fn emit_levels(app_handle: &AppHandle, levels: &Vec<f32>) {
     // also emit to the recording overlay if it's open
     if let Some(overlay_window) = app_handle.get_webview_window("recording_overlay") {
         let _ = overlay_window.emit("mic-level", levels);
+    }
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct LiveTranscriptionUpdate {
+    pub text: String,
+    pub stable_text: String,
+    pub is_final: bool,
+}
+
+pub fn emit_live_transcription_update(
+    app_handle: &AppHandle,
+    text: &str,
+    stable_text: &str,
+    is_final: bool,
+) {
+    let update = LiveTranscriptionUpdate {
+        text: text.to_string(),
+        stable_text: stable_text.to_string(),
+        is_final,
+    };
+
+    let _ = app_handle.emit("live-transcription-update", update.clone());
+    if let Some(overlay_window) = app_handle.get_webview_window("recording_overlay") {
+        let _ = overlay_window.emit("live-transcription-update", update);
     }
 }

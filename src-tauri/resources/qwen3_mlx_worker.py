@@ -8,10 +8,13 @@ for every transcription.
 
 from __future__ import annotations
 
+import base64
 import json
 import sys
 import time
 import traceback
+
+import numpy as np
 
 
 def emit(payload: dict) -> None:
@@ -34,6 +37,8 @@ def main() -> int:
         traceback.print_exc(file=sys.stderr)
         return 1
 
+    stream_state = None
+
     emit({"ready": True})
 
     for line in sys.stdin:
@@ -47,6 +52,81 @@ def main() -> int:
             if request.get("cmd") == "shutdown":
                 emit({"ok": True})
                 return 0
+
+            if request.get("cmd") == "stream_start":
+                request_id = request.get("id")
+                start = time.perf_counter()
+                stream_state = session.init_streaming(
+                    context=request.get("context") or "",
+                    language=request.get("language"),
+                    chunk_size_sec=float(request.get("chunk_size_sec") or 2.0),
+                    max_context_sec=float(request.get("max_context_sec") or 30.0),
+                    finalization_mode=request.get("finalization_mode") or "accuracy",
+                    endpointing_mode=request.get("endpointing_mode") or "fixed",
+                    unfixed_chunk_num=int(request.get("unfixed_chunk_num") or 2),
+                    unfixed_token_num=int(request.get("unfixed_token_num") or 5),
+                )
+                elapsed_ms = int((time.perf_counter() - start) * 1000)
+                emit(
+                    {
+                        "id": request_id,
+                        "ok": True,
+                        "text": stream_state.text,
+                        "stable_text": stream_state.stable_text,
+                        "elapsed_ms": elapsed_ms,
+                    }
+                )
+                continue
+
+            if request.get("cmd") == "stream_feed":
+                request_id = request.get("id")
+                if stream_state is None:
+                    raise RuntimeError("Qwen3 MLX streaming state is not active")
+
+                pcm16 = base64.b64decode(request.get("pcm16_b64") or "")
+                audio = np.frombuffer(pcm16, dtype="<i2").astype(np.float32) / 32768.0
+
+                start = time.perf_counter()
+                stream_state = session.feed_audio(audio, stream_state)
+                elapsed_ms = int((time.perf_counter() - start) * 1000)
+                emit(
+                    {
+                        "id": request_id,
+                        "ok": True,
+                        "text": stream_state.text,
+                        "stable_text": stream_state.stable_text,
+                        "elapsed_ms": elapsed_ms,
+                    }
+                )
+                continue
+
+            if request.get("cmd") == "stream_finish":
+                request_id = request.get("id")
+                if stream_state is None:
+                    emit({"id": request_id, "ok": True, "text": "", "stable_text": ""})
+                    continue
+
+                start = time.perf_counter()
+                stream_state = session.finish_streaming(stream_state)
+                elapsed_ms = int((time.perf_counter() - start) * 1000)
+                text = stream_state.text
+                stable_text = stream_state.stable_text
+                stream_state = None
+                emit(
+                    {
+                        "id": request_id,
+                        "ok": True,
+                        "text": text,
+                        "stable_text": stable_text,
+                        "elapsed_ms": elapsed_ms,
+                    }
+                )
+                continue
+
+            if request.get("cmd") == "stream_cancel":
+                stream_state = None
+                emit({"id": request.get("id"), "ok": True, "text": "", "stable_text": ""})
+                continue
 
             request_id = request.get("id")
             audio_path = request["audio_path"]

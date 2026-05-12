@@ -1,12 +1,12 @@
 .recording-overlay {
-  height: 36px;
-  width: 172px;
+  height: 72px;
+  width: 520px;
   display: grid;
   grid-template-columns: auto 1fr auto;
   align-items: center;
-  padding: 6px;
+  padding: 8px 10px;
   background: #000000cc;
-  border-radius: 18px;
+  border-radius: 8px;
   opacity: 0;
   transition: opacity 300ms ease-out;
   box-sizing: border-box;
@@ -19,8 +19,11 @@
 
 .overlay-middle {
   display: flex;
+  min-width: 0;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
+  gap: 5px;
 }
 
 .overlay-right {
@@ -35,17 +38,43 @@
   justify-content: center;
   gap: 3px;
   padding-bottom: 0px;
-  height: 24px;
+  height: 22px;
   overflow: hidden;
 }
 
 .bar {
-  width: 6px;
+  width: 5px;
   background: #ffe5ee;
   max-height: 20px;
   border-radius: 2px;
   transition: height 80ms linear;
   min-height: 4px;
+}
+
+.live-preview {
+  width: 100%;
+  max-width: 420px;
+  min-height: 18px;
+  color: #ffffff;
+  font-size: 13px;
+  line-height: 18px;
+  font-family:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: center;
+}
+
+.live-preview-stable {
+  color: #ffffff;
+}
+
+.live-preview-unstable {
+  color: #ffe5ee;
+  text-decoration: underline;
+  text-decoration-color: #ffe5ee80;
+  text-underline-offset: 3px;
 }
 
 .recording-overlay.fade-in {

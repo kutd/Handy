@@ -1,5 +1,6 @@
 use crate::audio_toolkit::constants;
 use anyhow::{Context, Result};
+use base64::{engine::general_purpose, Engine as _};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::io::{BufRead, BufReader, Write};
@@ -25,8 +26,15 @@ struct ReadyResponse {
 struct WorkerResponse {
     ok: bool,
     text: Option<String>,
+    stable_text: Option<String>,
     error: Option<String>,
     elapsed_ms: Option<u64>,
+}
+
+#[derive(Clone, Debug)]
+pub struct QwenStreamUpdate {
+    pub text: String,
+    pub stable_text: String,
 }
 
 pub struct QwenMlxEngine {
@@ -160,6 +168,122 @@ impl QwenMlxEngine {
 
         let _ = fs::remove_file(&audio_path);
         result
+    }
+
+    pub fn stream_start(&mut self, language: Option<&str>, context: &str) -> Result<()> {
+        let request_id = self.next_request_id;
+        self.next_request_id = self.next_request_id.saturating_add(1);
+
+        let request = serde_json::json!({
+            "cmd": "stream_start",
+            "id": request_id,
+            "language": language,
+            "context": context,
+            "chunk_size_sec": 2.0,
+            "max_context_sec": 30.0,
+            "finalization_mode": "accuracy",
+            "endpointing_mode": "fixed",
+            "unfixed_chunk_num": 2,
+            "unfixed_token_num": 5,
+        });
+
+        let response = self.send_json_request(&request)?;
+        if !response.ok {
+            anyhow::bail!(
+                "Qwen3 MLX streaming start failed: {}",
+                response
+                    .error
+                    .unwrap_or_else(|| "unknown error".to_string())
+            );
+        }
+        Ok(())
+    }
+
+    pub fn stream_feed(&mut self, audio: &[f32]) -> Result<QwenStreamUpdate> {
+        let request_id = self.next_request_id;
+        self.next_request_id = self.next_request_id.saturating_add(1);
+
+        let mut pcm16 = Vec::with_capacity(audio.len() * 2);
+        for sample in audio {
+            let scaled = (sample.clamp(-1.0, 1.0) * i16::MAX as f32).round() as i16;
+            pcm16.extend_from_slice(&scaled.to_le_bytes());
+        }
+
+        let request = serde_json::json!({
+            "cmd": "stream_feed",
+            "id": request_id,
+            "pcm16_b64": general_purpose::STANDARD.encode(pcm16),
+        });
+
+        let response = self.send_json_request(&request)?;
+        if !response.ok {
+            anyhow::bail!(
+                "Qwen3 MLX streaming feed failed: {}",
+                response
+                    .error
+                    .unwrap_or_else(|| "unknown error".to_string())
+            );
+        }
+        if let Some(elapsed_ms) = response.elapsed_ms {
+            log::debug!("Qwen3 MLX streaming feed took {}ms", elapsed_ms);
+        }
+        Ok(QwenStreamUpdate {
+            text: response.text.unwrap_or_default(),
+            stable_text: response.stable_text.unwrap_or_default(),
+        })
+    }
+
+    pub fn stream_cancel(&mut self) -> Result<()> {
+        self.send_stream_control("stream_cancel").map(|_| ())
+    }
+
+    fn send_stream_control(&mut self, cmd: &str) -> Result<QwenStreamUpdate> {
+        let request_id = self.next_request_id;
+        self.next_request_id = self.next_request_id.saturating_add(1);
+
+        let request = serde_json::json!({
+            "cmd": cmd,
+            "id": request_id,
+        });
+
+        let response = self.send_json_request(&request)?;
+        if !response.ok {
+            anyhow::bail!(
+                "Qwen3 MLX streaming command '{}' failed: {}",
+                cmd,
+                response
+                    .error
+                    .unwrap_or_else(|| "unknown error".to_string())
+            );
+        }
+        Ok(QwenStreamUpdate {
+            text: response.text.unwrap_or_default(),
+            stable_text: response.stable_text.unwrap_or_default(),
+        })
+    }
+
+    fn send_json_request(&mut self, request: &serde_json::Value) -> Result<WorkerResponse> {
+        serde_json::to_writer(&mut self.stdin, request)
+            .context("failed to serialize Qwen3 MLX request")?;
+        self.stdin
+            .write_all(b"\n")
+            .context("failed to write Qwen3 MLX request newline")?;
+        self.stdin
+            .flush()
+            .context("failed to flush Qwen3 MLX request")?;
+
+        let mut line = String::new();
+        let n = self
+            .stdout
+            .read_line(&mut line)
+            .context("failed to read Qwen3 MLX response")?;
+        if n == 0 {
+            let status = self.child.try_wait().ok().flatten();
+            anyhow::bail!("Qwen3 MLX worker exited unexpectedly: {:?}", status);
+        }
+
+        serde_json::from_str(&line)
+            .with_context(|| format!("invalid Qwen3 MLX worker response: {line:?}"))
     }
 }
 

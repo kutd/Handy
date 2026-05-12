@@ -1,7 +1,7 @@
 use crate::audio_toolkit::{apply_custom_words, filter_transcription_output};
 use crate::managers::audio::AudioRecordingManager;
 use crate::managers::model::{EngineType, ModelManager};
-use crate::managers::qwen_mlx::QwenMlxEngine;
+use crate::managers::qwen_mlx::{QwenMlxEngine, QwenStreamUpdate};
 use crate::settings::{
     get_settings, ModelUnloadTimeout, OrtAcceleratorSetting, WhisperAcceleratorSetting,
 };
@@ -446,6 +446,111 @@ impl TranscriptionManager {
     pub fn get_current_model(&self) -> Option<String> {
         let current_model = self.current_model_id.lock().unwrap();
         current_model.clone()
+    }
+
+    fn ensure_selected_model_loaded(&self) -> Result<String> {
+        let settings = get_settings(&self.app_handle);
+        let selected_model = settings.selected_model.clone();
+
+        loop {
+            {
+                let mut is_loading = self.is_loading.lock().unwrap();
+                while *is_loading {
+                    is_loading = self.loading_condvar.wait(is_loading).unwrap();
+                }
+            }
+
+            let already_loaded = {
+                let current_model = self.current_model_id.lock().unwrap().clone();
+                let engine = self.lock_engine();
+                engine.is_some() && current_model.as_deref() == Some(selected_model.as_str())
+            };
+            if already_loaded {
+                return Ok(selected_model);
+            }
+
+            if let Some(_guard) = self.try_start_loading() {
+                self.load_model(&selected_model)?;
+                return Ok(selected_model);
+            }
+        }
+    }
+
+    fn validated_language_for_model(&self, model_id: &str, selected_language: &str) -> String {
+        if selected_language == "auto" {
+            return "auto".to_string();
+        }
+
+        let is_supported = self
+            .model_manager
+            .get_model_info(model_id)
+            .map(|info| {
+                info.supported_languages.is_empty()
+                    || info
+                        .supported_languages
+                        .contains(&selected_language.to_string())
+            })
+            .unwrap_or(true);
+
+        if is_supported {
+            selected_language.to_string()
+        } else {
+            "auto".to_string()
+        }
+    }
+
+    pub fn start_qwen_live_stream(&self) -> Result<()> {
+        let model_id = self.ensure_selected_model_loaded()?;
+        let settings = get_settings(&self.app_handle);
+        let validated_language =
+            self.validated_language_for_model(&model_id, &settings.selected_language);
+        let language = qwen3_language_hint(&validated_language);
+        let context = build_qwen3_context(&settings.custom_words, &validated_language);
+
+        let mut engine = self.lock_engine();
+        match engine.as_mut() {
+            Some(LoadedEngine::Qwen3Mlx(qwen_mlx_engine)) => {
+                qwen_mlx_engine.stream_start(language.as_deref(), context.as_str())?;
+                self.touch_activity();
+                Ok(())
+            }
+            _ => Err(anyhow::anyhow!(
+                "Live transcription preview is only available for Qwen3 MLX models"
+            )),
+        }
+    }
+
+    pub fn feed_qwen_live_stream(&self, audio: &[f32]) -> Result<QwenStreamUpdate> {
+        if audio.is_empty() {
+            return Ok(QwenStreamUpdate {
+                text: String::new(),
+                stable_text: String::new(),
+            });
+        }
+
+        let mut engine = self.lock_engine();
+        let update = match engine.as_mut() {
+            Some(LoadedEngine::Qwen3Mlx(qwen_mlx_engine)) => qwen_mlx_engine.stream_feed(audio)?,
+            _ => {
+                return Err(anyhow::anyhow!(
+                    "Live transcription preview is only available for Qwen3 MLX models"
+                ));
+            }
+        };
+        self.touch_activity();
+        Ok(QwenStreamUpdate {
+            text: remove_qwen3_context_leak(&update.text),
+            stable_text: remove_qwen3_context_leak(&update.stable_text),
+        })
+    }
+
+    pub fn cancel_qwen_live_stream(&self) -> Result<()> {
+        let mut engine = self.lock_engine();
+        if let Some(LoadedEngine::Qwen3Mlx(qwen_mlx_engine)) = engine.as_mut() {
+            qwen_mlx_engine.stream_cancel()?;
+        }
+        self.touch_activity();
+        Ok(())
     }
 
     pub fn transcribe(&self, audio: Vec<f32>) -> Result<String> {

@@ -16,7 +16,10 @@ English README: [README.md](README.md)
 - Python worker를 상시 실행해 `mlx-qwen3-asr`의 `Session`을 재사용
 - 매번 모델을 다시 불러오지 않아 짧은 한국어 받아쓰기 응답 속도를 줄이는 구조
 - Qwen3 언어 힌트는 한국어로 지정하고, Handy 사용자 지정 단어만 선택적으로 Qwen3 context로 전달
+- 녹음 중 Qwen3 MLX 실시간 미리보기를 overlay에 표시합니다. Qwen 스트리밍의 미확정 꼬리 구간이 바뀌면 overlay 텍스트도 즉시 다시 렌더링됩니다.
 - 기존 Whisper, Parakeet, SenseVoice, GigaAM, Canary, Cohere 경로는 그대로 유지
+
+롤백 기준: `stable-before-live-qwen-preview` 태그는 Qwen 실시간 미리보기 추가 직전의 안정 상태를 가리킵니다.
 
 ## 릴리즈
 
