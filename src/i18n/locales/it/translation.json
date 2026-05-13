@@ -423,7 +423,15 @@
         "createPrompt": "Crea Prompt",
         "cancel": "Annulla",
         "selectToEdit": "Scegli un prompt qui sopra per visualizzare o modificare i dettagli.",
-        "createFirst": "Clicca 'Crea un nuovo prompt' qui sopra per creare il tuo primo prompt di post-elaborazione."
+        "createFirst": "Clicca 'Crea un nuovo prompt' qui sopra per creare il tuo primo prompt di post-elaborazione.",
+        "contextPrompt": {
+          "title": "Previous Input Decision Prompt",
+          "description": "Controls how the local LLM decides whether the current transcript should be inserted as new text or used to replace the previous inserted text.",
+          "placeholder": "Write the decision prompt used with P_raw, P, and C.",
+          "tip": "The app appends <code>P_raw</code> (previous raw transcript), <code>P</code> (previous inserted text), and <code>C</code> (current raw transcript). The model must return JSON with <code>operation</code> and <code>transcription</code>.",
+          "update": "Update Decision Prompt",
+          "reset": "Reset to Default"
+        }
       }
     },
     "history": {

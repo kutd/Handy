@@ -418,6 +418,82 @@ export const PostProcessingSettingsApi = React.memo(
 );
 PostProcessingSettingsApi.displayName = "PostProcessingSettingsApi";
 
+const PostProcessingContextPromptComponent: React.FC = () => {
+  const { t } = useTranslation();
+  const { getSetting, updateSetting, resetSetting, isUpdating } = useSettings();
+  const contextPrompt = getSetting("post_process_context_prompt") || "";
+  const [draftText, setDraftText] = useState(contextPrompt);
+
+  useEffect(() => {
+    setDraftText(contextPrompt);
+  }, [contextPrompt]);
+
+  const isDirty = draftText.trim() !== contextPrompt.trim();
+  const isSaving = isUpdating("post_process_context_prompt");
+
+  const handleUpdate = async () => {
+    if (!draftText.trim()) return;
+    await updateSetting("post_process_context_prompt", draftText.trim());
+  };
+
+  const handleReset = async () => {
+    await resetSetting("post_process_context_prompt");
+  };
+
+  return (
+    <SettingContainer
+      title={t("settings.postProcessing.prompts.contextPrompt.title")}
+      description={t(
+        "settings.postProcessing.prompts.contextPrompt.description",
+      )}
+      descriptionMode="tooltip"
+      layout="stacked"
+      grouped={true}
+    >
+      <div className="space-y-3">
+        <div className="space-y-2 flex flex-col">
+          <label className="text-sm font-semibold">
+            {t("settings.postProcessing.prompts.promptInstructions")}
+          </label>
+          <Textarea
+            value={draftText}
+            onChange={(e) => setDraftText(e.target.value)}
+            placeholder={t(
+              "settings.postProcessing.prompts.contextPrompt.placeholder",
+            )}
+            className="min-h-[220px] font-mono text-xs"
+          />
+          <p className="text-xs text-mid-gray/70">
+            <Trans
+              i18nKey="settings.postProcessing.prompts.contextPrompt.tip"
+              components={{ code: <code /> }}
+            />
+          </p>
+        </div>
+
+        <div className="flex gap-2 pt-2">
+          <Button
+            onClick={handleUpdate}
+            variant="primary"
+            size="md"
+            disabled={!draftText.trim() || !isDirty || isSaving}
+          >
+            {t("settings.postProcessing.prompts.contextPrompt.update")}
+          </Button>
+          <Button
+            onClick={handleReset}
+            variant="secondary"
+            size="md"
+            disabled={isSaving}
+          >
+            {t("settings.postProcessing.prompts.contextPrompt.reset")}
+          </Button>
+        </div>
+      </div>
+    </SettingContainer>
+  );
+};
+
 export const PostProcessingSettingsPrompts = React.memo(
   PostProcessingSettingsPromptsComponent,
 );
@@ -442,6 +518,7 @@ export const PostProcessingSettings: React.FC = () => {
 
       <SettingsGroup title={t("settings.postProcessing.prompts.title")}>
         <PostProcessingSettingsPrompts />
+        <PostProcessingContextPromptComponent />
       </SettingsGroup>
     </div>
   );

@@ -399,6 +399,8 @@ pub struct AppSettings {
     pub post_process_models: HashMap<String, String>,
     #[serde(default = "default_post_process_prompts")]
     pub post_process_prompts: Vec<LLMPrompt>,
+    #[serde(default = "default_post_process_context_prompt")]
+    pub post_process_context_prompt: String,
     #[serde(default)]
     pub post_process_selected_prompt_id: Option<String>,
     #[serde(default)]
@@ -407,6 +409,8 @@ pub struct AppSettings {
     pub append_trailing_space: bool,
     #[serde(default = "default_recent_transcription_undo_enabled")]
     pub recent_transcription_undo_enabled: bool,
+    #[serde(default = "default_recent_transcription_undo_window_ms")]
+    pub recent_transcription_undo_window_ms: u64,
     #[serde(default = "default_app_language")]
     pub app_language: String,
     #[serde(default)]
@@ -491,6 +495,10 @@ fn default_auto_submit() -> bool {
 
 fn default_recent_transcription_undo_enabled() -> bool {
     true
+}
+
+fn default_recent_transcription_undo_window_ms() -> u64 {
+    5_000
 }
 
 fn default_history_limit() -> usize {
@@ -652,6 +660,10 @@ fn default_post_process_prompts() -> Vec<LLMPrompt> {
     }]
 }
 
+pub fn default_post_process_context_prompt() -> String {
+    "You are Handy post-processor. Return only JSON:\n{\"operation\":\"insert\",\"transcription\":\"...\"}\nor\n{\"operation\":\"replace_previous\",\"transcription\":\"...\"}\n\nP_raw = previous raw transcription.\nP = previous text actually inserted in the input field.\nC = current raw transcription.\n\nRules:\n- Default to insert.\n- Use replace_previous only when C clearly asks to edit, fix, replace, delete, or correct P.\n- Korean correction cues like \"아니\", \"그게 아니라\", \"정확히는\", \"말고\", \"방금\", \"이전\", \"아까\" may indicate replace_previous only if C is correcting P.\n- If C is normal new dictation, a continuation, or a new thought, use insert. Do not merge it with P.\n- insert: clean C only. Return only the new text to insert now.\n- replace_previous: apply C to P. Return the full replacement for P. Do not include the spoken command.\n- Preserve language, meaning, and tone. No explanations.".to_string()
+}
+
 fn default_whisper_gpu_device() -> i32 {
     -1 // auto
 }
@@ -711,6 +723,11 @@ fn ensure_post_process_defaults(settings: &mut AppSettings) -> bool {
                 changed = true;
             }
         }
+    }
+
+    if settings.post_process_context_prompt.trim().is_empty() {
+        settings.post_process_context_prompt = default_post_process_context_prompt();
+        changed = true;
     }
 
     changed
@@ -779,7 +796,7 @@ pub fn get_default_settings() -> AppSettings {
         ShortcutBinding {
             id: "delete_recent_transcription".to_string(),
             name: "Delete Last Inserted Transcription".to_string(),
-            description: "Deletes the text inserted by the most recent transcription.".to_string(),
+            description: "Deletes the text inserted by the most recent transcription. Press it twice quickly to clear the current input field.".to_string(),
             default_binding: default_recent_transcription_undo_shortcut.to_string(),
             current_binding: default_recent_transcription_undo_shortcut.to_string(),
         },
@@ -819,10 +836,12 @@ pub fn get_default_settings() -> AppSettings {
         post_process_api_keys: default_post_process_api_keys(),
         post_process_models: default_post_process_models(),
         post_process_prompts: default_post_process_prompts(),
+        post_process_context_prompt: default_post_process_context_prompt(),
         post_process_selected_prompt_id: None,
         mute_while_recording: false,
         append_trailing_space: false,
         recent_transcription_undo_enabled: default_recent_transcription_undo_enabled(),
+        recent_transcription_undo_window_ms: default_recent_transcription_undo_window_ms(),
         app_language: default_app_language(),
         experimental_enabled: false,
         lazy_stream_close: false,
@@ -1009,6 +1028,7 @@ mod tests {
     fn recent_transcription_undo_defaults_to_enabled() {
         let settings = get_default_settings();
         assert!(settings.recent_transcription_undo_enabled);
+        assert_eq!(settings.recent_transcription_undo_window_ms, 5_000);
         assert!(settings
             .bindings
             .contains_key("delete_recent_transcription"));

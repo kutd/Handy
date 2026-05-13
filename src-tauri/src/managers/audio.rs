@@ -135,6 +135,12 @@ fn create_audio_recorder(
             move |levels| {
                 utils::emit_levels(&app_handle, &levels);
             }
+        })
+        .with_interim_callback({
+            let app_handle = app_handle.clone();
+            move |samples| {
+                crate::interim_transcription::request_preview(&app_handle, samples);
+            }
         });
 
     Ok(recorder)

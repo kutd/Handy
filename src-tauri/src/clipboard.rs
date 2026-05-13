@@ -588,7 +588,7 @@ fn should_send_auto_submit(auto_submit: bool, paste_method: PasteMethod) -> bool
     auto_submit && paste_method != PasteMethod::None
 }
 
-pub fn paste(text: String, app_handle: AppHandle) -> Result<(), String> {
+pub fn paste(text: String, app_handle: AppHandle) -> Result<usize, String> {
     let settings = get_settings(&app_handle);
     let paste_method = settings.paste_method;
     let paste_delay_ms = settings.paste_delay_ms;
@@ -659,11 +659,14 @@ pub fn paste(text: String, app_handle: AppHandle) -> Result<(), String> {
             .map_err(|e| format!("Failed to copy to clipboard: {}", e))?;
     }
 
-    if paste_method != PasteMethod::None {
+    let inserted_char_count = if paste_method != PasteMethod::None {
         crate::recent_transcription_undo::record_inserted_text(&app_handle, &text);
-    }
+        text.chars().count()
+    } else {
+        0
+    };
 
-    Ok(())
+    Ok(inserted_char_count)
 }
 
 #[cfg(test)]

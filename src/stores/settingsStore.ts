@@ -131,6 +131,8 @@ const settingUpdaters: {
   history_limit: (value) => commands.updateHistoryLimit(value as number),
   post_process_enabled: (value) =>
     commands.changePostProcessEnabledSetting(value as boolean),
+  post_process_context_prompt: (value) =>
+    commands.changePostProcessContextPromptSetting(value as string),
   post_process_selected_prompt_id: (value) =>
     commands.setPostProcessSelectedPrompt(value as string),
   mute_while_recording: (value) =>
@@ -139,6 +141,8 @@ const settingUpdaters: {
     commands.changeAppendTrailingSpaceSetting(value as boolean),
   recent_transcription_undo_enabled: (value) =>
     commands.changeRecentTranscriptionUndoEnabledSetting(value as boolean),
+  recent_transcription_undo_window_ms: (value) =>
+    commands.changeRecentTranscriptionUndoWindowMsSetting(value as number),
   log_level: (value) => commands.setLogLevel(value as any),
   app_language: (value) => commands.changeAppLanguageSetting(value as string),
   experimental_enabled: (value) =>

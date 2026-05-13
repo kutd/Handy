@@ -9,13 +9,47 @@ for every transcription.
 from __future__ import annotations
 
 import json
+import gc
+import os
 import sys
 import time
 import traceback
 
+try:
+    import mlx.core as mx
+except Exception:  # noqa: BLE001 - MLX import failure is reported during Session load
+    mx = None
+
 
 def emit(payload: dict) -> None:
     print(json.dumps(payload, ensure_ascii=False), flush=True)
+
+
+def configure_mlx_memory() -> None:
+    if mx is None or not hasattr(mx, "metal"):
+        return
+
+    try:
+        cache_limit_mb = int(os.environ.get("HANDY_QWEN3_MLX_CACHE_LIMIT_MB", "512"))
+        if cache_limit_mb > 0 and hasattr(mx.metal, "set_cache_limit"):
+            mx.metal.set_cache_limit(cache_limit_mb * 1024 * 1024)
+    except Exception:
+        pass
+
+
+def release_transient_memory() -> None:
+    if mx is not None:
+        try:
+            mx.synchronize()
+        except Exception:
+            pass
+        try:
+            if hasattr(mx, "metal") and hasattr(mx.metal, "clear_cache"):
+                mx.metal.clear_cache()
+        except Exception:
+            pass
+
+    gc.collect()
 
 
 def main() -> int:
@@ -24,6 +58,7 @@ def main() -> int:
         return 2
 
     model = sys.argv[1]
+    configure_mlx_memory()
 
     try:
         from mlx_qwen3_asr import Session
@@ -54,18 +89,24 @@ def main() -> int:
             context = request.get("context") or ""
 
             start = time.perf_counter()
-            result = session.transcribe(
-                audio_path,
-                language=language,
-                context=context,
-            )
-            elapsed_ms = int((time.perf_counter() - start) * 1000)
+            result = None
+            try:
+                result = session.transcribe(
+                    audio_path,
+                    language=language,
+                    context=context,
+                )
+                text = result.text
+                elapsed_ms = int((time.perf_counter() - start) * 1000)
+            finally:
+                del result
+                release_transient_memory()
 
             emit(
                 {
                     "id": request_id,
                     "ok": True,
-                    "text": result.text,
+                    "text": text,
                     "elapsed_ms": elapsed_ms,
                 }
             )

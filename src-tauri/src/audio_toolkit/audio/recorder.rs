@@ -4,7 +4,7 @@ use std::{
         atomic::{AtomicBool, Ordering},
         mpsc, Arc, Mutex,
     },
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use cpal::{
@@ -30,12 +30,21 @@ enum AudioChunk {
     EndOfStream,
 }
 
+#[derive(Clone)]
+pub struct InterimTranscriptionAudio {
+    pub samples: Vec<f32>,
+    pub sample_start: usize,
+    pub sample_end: usize,
+    pub replace_existing: bool,
+}
+
 pub struct AudioRecorder {
     device: Option<Device>,
     cmd_tx: Option<mpsc::Sender<Cmd>>,
     worker_handle: Option<std::thread::JoinHandle<()>>,
     vad: Option<Arc<Mutex<Box<dyn vad::VoiceActivityDetector>>>>,
     level_cb: Option<Arc<dyn Fn(Vec<f32>) + Send + Sync + 'static>>,
+    interim_cb: Option<Arc<dyn Fn(InterimTranscriptionAudio) + Send + Sync + 'static>>,
 }
 
 impl AudioRecorder {
@@ -46,6 +55,7 @@ impl AudioRecorder {
             worker_handle: None,
             vad: None,
             level_cb: None,
+            interim_cb: None,
         })
     }
 
@@ -59,6 +69,14 @@ impl AudioRecorder {
         F: Fn(Vec<f32>) + Send + Sync + 'static,
     {
         self.level_cb = Some(Arc::new(cb));
+        self
+    }
+
+    pub fn with_interim_callback<F>(mut self, cb: F) -> Self
+    where
+        F: Fn(InterimTranscriptionAudio) + Send + Sync + 'static,
+    {
+        self.interim_cb = Some(Arc::new(cb));
         self
     }
 
@@ -83,6 +101,7 @@ impl AudioRecorder {
         let vad = self.vad.clone();
         // Move the optional level callback into the worker thread
         let level_cb = self.level_cb.clone();
+        let interim_cb = self.interim_cb.clone();
 
         let worker = std::thread::spawn(move || {
             let stop_flag = Arc::new(AtomicBool::new(false));
@@ -159,7 +178,15 @@ impl AudioRecorder {
                 Ok((stream, sample_rate)) => {
                     let _ = init_tx.send(Ok(()));
                     // Keep the stream alive while we process samples.
-                    run_consumer(sample_rate, vad, sample_rx, cmd_rx, level_cb, stop_flag);
+                    run_consumer(
+                        sample_rate,
+                        vad,
+                        sample_rx,
+                        cmd_rx,
+                        level_cb,
+                        interim_cb,
+                        stop_flag,
+                    );
                     drop(stream);
                 }
                 Err(error_message) => {
@@ -398,6 +425,7 @@ fn run_consumer(
     sample_rx: mpsc::Receiver<AudioChunk>,
     cmd_rx: mpsc::Receiver<Cmd>,
     level_cb: Option<Arc<dyn Fn(Vec<f32>) + Send + Sync + 'static>>,
+    interim_cb: Option<Arc<dyn Fn(InterimTranscriptionAudio) + Send + Sync + 'static>>,
     stop_flag: Arc<AtomicBool>,
 ) {
     let mut frame_resampler = FrameResampler::new(
@@ -408,6 +436,7 @@ fn run_consumer(
 
     let mut processed_samples = Vec::<f32>::new();
     let mut recording = false;
+    let mut interim_state = InterimSnapshotState::default();
 
     // ---------- spectrum visualisation setup ---------------------------- //
     const BUCKETS: usize = 16;
@@ -424,6 +453,8 @@ fn run_consumer(
         samples: &[f32],
         recording: bool,
         vad: &Option<Arc<Mutex<Box<dyn vad::VoiceActivityDetector>>>>,
+        interim_cb: &Option<Arc<dyn Fn(InterimTranscriptionAudio) + Send + Sync + 'static>>,
+        interim_state: &mut InterimSnapshotState,
         out_buf: &mut Vec<f32>,
     ) {
         if !recording {
@@ -433,8 +464,22 @@ fn run_consumer(
         if let Some(vad_arc) = vad {
             let mut det = vad_arc.lock().unwrap();
             match det.push_frame(samples).unwrap_or(VadFrame::Speech(samples)) {
-                VadFrame::Speech(buf) => out_buf.extend_from_slice(buf),
-                VadFrame::Noise => {}
+                VadFrame::Speech(buf) => {
+                    out_buf.extend_from_slice(buf);
+                    if is_quiet_frame(samples) {
+                        interim_state.quiet_frame_count += 1;
+                        maybe_emit_quick_interim(out_buf, interim_cb, interim_state);
+                        maybe_emit_settled_interim(out_buf, interim_cb, interim_state);
+                    } else {
+                        interim_state.quiet_frame_count = 0;
+                        interim_state.settled_emitted_for_current_pause = false;
+                    }
+                }
+                VadFrame::Noise => {
+                    interim_state.quiet_frame_count += 1;
+                    maybe_emit_quick_interim(out_buf, interim_cb, interim_state);
+                    maybe_emit_settled_interim(out_buf, interim_cb, interim_state);
+                }
             }
         } else {
             out_buf.extend_from_slice(samples);
@@ -461,7 +506,14 @@ fn run_consumer(
 
         // ---------- existing pipeline ------------------------------------ //
         frame_resampler.push(&raw, &mut |frame: &[f32]| {
-            handle_frame(frame, recording, &vad, &mut processed_samples)
+            handle_frame(
+                frame,
+                recording,
+                &vad,
+                &interim_cb,
+                &mut interim_state,
+                &mut processed_samples,
+            )
         });
 
         // non-blocking check for a command
@@ -470,6 +522,7 @@ fn run_consumer(
                 Cmd::Start => {
                     stop_flag.store(false, Ordering::Relaxed);
                     processed_samples.clear();
+                    interim_state.reset();
                     recording = true;
                     visualizer.reset();
                     if let Some(v) = &vad {
@@ -479,6 +532,9 @@ fn run_consumer(
                 Cmd::Stop(reply_tx) => {
                     recording = false;
                     stop_flag.store(true, Ordering::Relaxed);
+                    let no_interim_cb: Option<
+                        Arc<dyn Fn(InterimTranscriptionAudio) + Send + Sync + 'static>,
+                    > = None;
 
                     // Drain all remaining audio until the producer confirms end-of-stream.
                     // The cpal callback sees the stop flag, sends EndOfStream, and goes
@@ -488,7 +544,14 @@ fn run_consumer(
                         match sample_rx.recv_timeout(Duration::from_secs(2)) {
                             Ok(AudioChunk::Samples(remaining)) => {
                                 frame_resampler.push(&remaining, &mut |frame: &[f32]| {
-                                    handle_frame(frame, true, &vad, &mut processed_samples)
+                                    handle_frame(
+                                        frame,
+                                        true,
+                                        &vad,
+                                        &no_interim_cb,
+                                        &mut interim_state,
+                                        &mut processed_samples,
+                                    )
                                 });
                             }
                             Ok(AudioChunk::EndOfStream) => break,
@@ -500,7 +563,14 @@ fn run_consumer(
                     }
 
                     frame_resampler.finish(&mut |frame: &[f32]| {
-                        handle_frame(frame, true, &vad, &mut processed_samples)
+                        handle_frame(
+                            frame,
+                            true,
+                            &vad,
+                            &no_interim_cb,
+                            &mut interim_state,
+                            &mut processed_samples,
+                        )
                     });
 
                     let _ = reply_tx.send(std::mem::take(&mut processed_samples));
@@ -516,4 +586,145 @@ fn run_consumer(
             }
         }
     }
+}
+
+const INTERIM_MIN_TOTAL_SAMPLES: usize = constants::WHISPER_SAMPLE_RATE as usize * 7 / 10;
+const INTERIM_MIN_NEW_SAMPLES: usize = constants::WHISPER_SAMPLE_RATE as usize * 11 / 20;
+const INTERIM_QUICK_QUIET_FRAMES: usize = 5;
+const INTERIM_SETTLED_QUIET_FRAMES: usize = 14;
+const INTERIM_QUIET_RMS: f32 = 0.008;
+const INTERIM_QUIET_PEAK: f32 = 0.035;
+const INTERIM_QUICK_COOLDOWN: Duration = Duration::from_millis(700);
+const INTERIM_SETTLED_COOLDOWN: Duration = Duration::from_millis(900);
+const INTERIM_MAX_PREVIEW_SAMPLES: usize = constants::WHISPER_SAMPLE_RATE as usize * 8;
+
+struct InterimSnapshotState {
+    last_quick_snapshot_len: usize,
+    last_settled_snapshot_len: usize,
+    quiet_frame_count: usize,
+    settled_emitted_for_current_pause: bool,
+    next_quick_allowed_at: Instant,
+    next_settled_allowed_at: Instant,
+}
+
+impl Default for InterimSnapshotState {
+    fn default() -> Self {
+        Self {
+            last_quick_snapshot_len: 0,
+            last_settled_snapshot_len: 0,
+            quiet_frame_count: 0,
+            settled_emitted_for_current_pause: false,
+            next_quick_allowed_at: Instant::now(),
+            next_settled_allowed_at: Instant::now(),
+        }
+    }
+}
+
+impl InterimSnapshotState {
+    fn reset(&mut self) {
+        self.last_quick_snapshot_len = 0;
+        self.last_settled_snapshot_len = 0;
+        self.quiet_frame_count = 0;
+        self.settled_emitted_for_current_pause = false;
+        self.next_quick_allowed_at = Instant::now();
+        self.next_settled_allowed_at = Instant::now();
+    }
+}
+
+fn is_quiet_frame(samples: &[f32]) -> bool {
+    if samples.is_empty() {
+        return true;
+    }
+
+    let mut sum_squares = 0.0;
+    let mut peak = 0.0;
+    for sample in samples {
+        let abs = sample.abs();
+        sum_squares += sample * sample;
+        if abs > peak {
+            peak = abs;
+        }
+    }
+
+    let rms = (sum_squares / samples.len() as f32).sqrt();
+    rms < INTERIM_QUIET_RMS && peak < INTERIM_QUIET_PEAK
+}
+
+fn maybe_emit_quick_interim(
+    out_buf: &[f32],
+    interim_cb: &Option<Arc<dyn Fn(InterimTranscriptionAudio) + Send + Sync + 'static>>,
+    state: &mut InterimSnapshotState,
+) {
+    let Some(cb) = interim_cb else {
+        return;
+    };
+
+    if state.quiet_frame_count < INTERIM_QUICK_QUIET_FRAMES {
+        return;
+    }
+
+    let now = Instant::now();
+    if now < state.next_quick_allowed_at || out_buf.len() < INTERIM_MIN_TOTAL_SAMPLES {
+        return;
+    }
+
+    let new_samples = out_buf.len().saturating_sub(state.last_quick_snapshot_len);
+    if new_samples < INTERIM_MIN_NEW_SAMPLES {
+        return;
+    }
+
+    let start = state
+        .last_quick_snapshot_len
+        .max(out_buf.len().saturating_sub(INTERIM_MAX_PREVIEW_SAMPLES))
+        .min(out_buf.len());
+    let end = out_buf.len();
+    let samples = out_buf[start..].to_vec();
+    state.last_quick_snapshot_len = out_buf.len();
+    state.next_quick_allowed_at = now + INTERIM_QUICK_COOLDOWN;
+    cb(InterimTranscriptionAudio {
+        samples,
+        sample_start: start,
+        sample_end: end,
+        replace_existing: false,
+    });
+}
+
+fn maybe_emit_settled_interim(
+    out_buf: &[f32],
+    interim_cb: &Option<Arc<dyn Fn(InterimTranscriptionAudio) + Send + Sync + 'static>>,
+    state: &mut InterimSnapshotState,
+) {
+    let Some(cb) = interim_cb else {
+        return;
+    };
+
+    if state.settled_emitted_for_current_pause
+        || state.quiet_frame_count < INTERIM_SETTLED_QUIET_FRAMES
+        || out_buf.len() < INTERIM_MIN_TOTAL_SAMPLES
+    {
+        return;
+    }
+
+    let now = Instant::now();
+    if now < state.next_settled_allowed_at
+        || out_buf
+            .len()
+            .saturating_sub(state.last_settled_snapshot_len)
+            < INTERIM_MIN_NEW_SAMPLES
+    {
+        return;
+    }
+
+    state.last_settled_snapshot_len = out_buf.len();
+    state.last_quick_snapshot_len = state.last_quick_snapshot_len.max(out_buf.len());
+    state.settled_emitted_for_current_pause = true;
+    state.next_settled_allowed_at = now + INTERIM_SETTLED_COOLDOWN;
+    let start = out_buf.len().saturating_sub(INTERIM_MAX_PREVIEW_SAMPLES);
+    let end = out_buf.len();
+    cb(InterimTranscriptionAudio {
+        samples: out_buf[start..].to_vec(),
+        sample_start: start,
+        sample_end: end,
+        replace_existing: true,
+    });
 }

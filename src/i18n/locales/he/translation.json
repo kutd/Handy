@@ -423,7 +423,15 @@
         "createPrompt": "צור פרומפט",
         "cancel": "ביטול",
         "selectToEdit": "בחר פרומפט למעלה כדי לצפות בפרטים שלו ולערוך אותם.",
-        "createFirst": "לחץ על 'צור פרומפט חדש' למעלה כדי ליצור את פרומפט העיבוד הראשון שלך."
+        "createFirst": "לחץ על 'צור פרומפט חדש' למעלה כדי ליצור את פרומפט העיבוד הראשון שלך.",
+        "contextPrompt": {
+          "title": "Previous Input Decision Prompt",
+          "description": "Controls how the local LLM decides whether the current transcript should be inserted as new text or used to replace the previous inserted text.",
+          "placeholder": "Write the decision prompt used with P_raw, P, and C.",
+          "tip": "The app appends <code>P_raw</code> (previous raw transcript), <code>P</code> (previous inserted text), and <code>C</code> (current raw transcript). The model must return JSON with <code>operation</code> and <code>transcription</code>.",
+          "update": "Update Decision Prompt",
+          "reset": "Reset to Default"
+        }
       }
     },
     "history": {

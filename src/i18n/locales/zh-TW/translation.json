@@ -423,7 +423,15 @@
         "createPrompt": "建立提示詞",
         "cancel": "取消",
         "selectToEdit": "選擇上方的提示詞以檢視和編輯其詳細資訊",
-        "createFirst": "點選上方的「建立新提示詞」來建立您的第一個後處理提示詞"
+        "createFirst": "點選上方的「建立新提示詞」來建立您的第一個後處理提示詞",
+        "contextPrompt": {
+          "title": "Previous Input Decision Prompt",
+          "description": "Controls how the local LLM decides whether the current transcript should be inserted as new text or used to replace the previous inserted text.",
+          "placeholder": "Write the decision prompt used with P_raw, P, and C.",
+          "tip": "The app appends <code>P_raw</code> (previous raw transcript), <code>P</code> (previous inserted text), and <code>C</code> (current raw transcript). The model must return JSON with <code>operation</code> and <code>transcription</code>.",
+          "update": "Update Decision Prompt",
+          "reset": "Reset to Default"
+        }
       }
     },
     "history": {

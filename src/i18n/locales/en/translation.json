@@ -179,7 +179,7 @@
           },
           "delete_recent_transcription": {
             "name": "Delete Last Inserted Transcription",
-            "description": "Within 5 seconds after transcription is inserted, use this shortcut to delete only that inserted text."
+            "description": "After transcription is inserted, use this shortcut within the configured undo window to delete only that inserted text. Press it twice quickly to clear the current input field at any time."
           }
         },
         "errors": {
@@ -363,7 +363,7 @@
       },
       "recentTranscriptionUndo": {
         "label": "Delete Last Inserted Transcription",
-        "description": "Enable the shortcut that deletes only the text inserted by the most recent transcription."
+        "description": "Enable the shortcut that deletes only the text inserted by the most recent transcription. Press it twice quickly to clear the current input field at any time."
       }
     },
     "postProcessing": {
@@ -423,7 +423,15 @@
         "createPrompt": "Create Prompt",
         "cancel": "Cancel",
         "selectToEdit": "Select a prompt above to view and edit its details.",
-        "createFirst": "Click 'Create New Prompt' above to create your first post-processing prompt."
+        "createFirst": "Click 'Create New Prompt' above to create your first post-processing prompt.",
+        "contextPrompt": {
+          "title": "Previous Input Decision Prompt",
+          "description": "Controls how the local LLM decides whether the current transcript should be inserted as new text or used to replace the previous inserted text.",
+          "placeholder": "Write the decision prompt used with P_raw, P, and C.",
+          "tip": "The app appends <code>P_raw</code> (previous raw transcript), <code>P</code> (previous inserted text), and <code>C</code> (current raw transcript). The model must return JSON with <code>operation</code> and <code>transcription</code>.",
+          "update": "Update Decision Prompt",
+          "reset": "Reset to Default"
+        }
       }
     },
     "history": {

@@ -844,6 +844,22 @@ pub fn change_post_process_enabled_setting(app: AppHandle, enabled: bool) -> Res
 
 #[tauri::command]
 #[specta::specta]
+pub fn change_post_process_context_prompt_setting(
+    app: AppHandle,
+    prompt: String,
+) -> Result<(), String> {
+    if prompt.trim().is_empty() {
+        return Err("Post-process context prompt cannot be empty".to_string());
+    }
+
+    let mut settings = settings::get_settings(&app);
+    settings.post_process_context_prompt = prompt;
+    settings::write_settings(&app, settings);
+    Ok(())
+}
+
+#[tauri::command]
+#[specta::specta]
 pub fn change_experimental_enabled_setting(app: AppHandle, enabled: bool) -> Result<(), String> {
     let mut settings = settings::get_settings(&app);
     settings.experimental_enabled = enabled;
@@ -1101,6 +1117,19 @@ pub fn change_recent_transcription_undo_enabled_setting(
         crate::recent_transcription_undo::clear_candidate(&app);
     }
 
+    Ok(())
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn change_recent_transcription_undo_window_ms_setting(
+    app: AppHandle,
+    ms: u64,
+) -> Result<(), String> {
+    let clamped = ms.clamp(500, 60_000);
+    let mut settings = settings::get_settings(&app);
+    settings.recent_transcription_undo_window_ms = clamped;
+    settings::write_settings(&app, settings);
     Ok(())
 }
 

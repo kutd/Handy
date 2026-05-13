@@ -49,6 +49,137 @@ enum LoadedEngine {
     Cohere(CohereModel),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum InferenceOwner {
+    Final,
+    Preview,
+}
+
+#[derive(Default)]
+struct InferenceState {
+    active_owner: Option<InferenceOwner>,
+    pending_final_count: usize,
+}
+
+#[derive(Default)]
+struct InferenceCoordinator {
+    state: Mutex<InferenceState>,
+    condvar: Condvar,
+}
+
+impl InferenceCoordinator {
+    fn lock_state(&self) -> MutexGuard<'_, InferenceState> {
+        self.state.lock().unwrap_or_else(|poisoned| {
+            warn!("Inference coordinator mutex was poisoned, recovering");
+            poisoned.into_inner()
+        })
+    }
+
+    fn reserve_final(self: &Arc<Self>) -> FinalTranscriptionIntent {
+        {
+            let mut state = self.lock_state();
+            state.pending_final_count = state.pending_final_count.saturating_add(1);
+        }
+        self.condvar.notify_all();
+
+        FinalTranscriptionIntent {
+            coordinator: self.clone(),
+            pending: true,
+        }
+    }
+
+    fn cancel_final_reservation(&self) {
+        {
+            let mut state = self.lock_state();
+            state.pending_final_count = state.pending_final_count.saturating_sub(1);
+        }
+        self.condvar.notify_all();
+    }
+
+    fn acquire_final_from_reservation(self: &Arc<Self>) -> InferenceRunGuard {
+        let mut state = self.lock_state();
+        while state.active_owner.is_some() {
+            state = self.condvar.wait(state).unwrap_or_else(|poisoned| {
+                warn!("Inference coordinator wait was poisoned, recovering");
+                poisoned.into_inner()
+            });
+        }
+
+        state.pending_final_count = state.pending_final_count.saturating_sub(1);
+        state.active_owner = Some(InferenceOwner::Final);
+
+        InferenceRunGuard {
+            coordinator: self.clone(),
+            owner: InferenceOwner::Final,
+        }
+    }
+
+    fn try_acquire_preview(self: &Arc<Self>) -> Option<InferenceRunGuard> {
+        let mut state = self.lock_state();
+        if state.active_owner.is_some() || state.pending_final_count > 0 {
+            debug!(
+                "Skipping interim transcription preview because final transcription is active or pending"
+            );
+            return None;
+        }
+
+        state.active_owner = Some(InferenceOwner::Preview);
+        Some(InferenceRunGuard {
+            coordinator: self.clone(),
+            owner: InferenceOwner::Preview,
+        })
+    }
+
+    fn release(&self, owner: InferenceOwner) {
+        {
+            let mut state = self.lock_state();
+            match state.active_owner {
+                Some(active_owner) if active_owner == owner => {
+                    state.active_owner = None;
+                }
+                _ => {
+                    warn!("Inference coordinator release saw an unexpected owner state");
+                    state.active_owner = None;
+                }
+            }
+        }
+        self.condvar.notify_all();
+    }
+}
+
+pub struct FinalTranscriptionIntent {
+    coordinator: Arc<InferenceCoordinator>,
+    pending: bool,
+}
+
+impl FinalTranscriptionIntent {
+    fn acquire(mut self) -> InferenceRunGuard {
+        let guard = self.coordinator.acquire_final_from_reservation();
+        self.pending = false;
+        guard
+    }
+}
+
+impl Drop for FinalTranscriptionIntent {
+    fn drop(&mut self) {
+        if self.pending {
+            self.coordinator.cancel_final_reservation();
+            self.pending = false;
+        }
+    }
+}
+
+struct InferenceRunGuard {
+    coordinator: Arc<InferenceCoordinator>,
+    owner: InferenceOwner,
+}
+
+impl Drop for InferenceRunGuard {
+    fn drop(&mut self) {
+        self.coordinator.release(self.owner);
+    }
+}
+
 /// RAII guard that clears the `is_loading` flag and notifies waiters on drop.
 /// Ensures the loading flag is always reset, even on early returns or panics.
 pub struct LoadingGuard {
@@ -75,6 +206,7 @@ pub struct TranscriptionManager {
     watcher_handle: Arc<Mutex<Option<thread::JoinHandle<()>>>>,
     is_loading: Arc<Mutex<bool>>,
     loading_condvar: Arc<Condvar>,
+    inference_coordinator: Arc<InferenceCoordinator>,
 }
 
 impl TranscriptionManager {
@@ -89,6 +221,7 @@ impl TranscriptionManager {
             watcher_handle: Arc::new(Mutex::new(None)),
             is_loading: Arc::new(Mutex::new(false)),
             loading_condvar: Arc::new(Condvar::new()),
+            inference_coordinator: Arc::new(InferenceCoordinator::default()),
         };
 
         // Start the idle watcher
@@ -448,7 +581,33 @@ impl TranscriptionManager {
         current_model.clone()
     }
 
+    pub fn reserve_final_transcription(&self) -> FinalTranscriptionIntent {
+        self.inference_coordinator.reserve_final()
+    }
+
     pub fn transcribe(&self, audio: Vec<f32>) -> Result<String> {
+        let intent = self.reserve_final_transcription();
+        self.transcribe_with_intent(audio, intent)
+    }
+
+    pub fn transcribe_with_intent(
+        &self,
+        audio: Vec<f32>,
+        intent: FinalTranscriptionIntent,
+    ) -> Result<String> {
+        let _inference_guard = intent.acquire();
+        self.transcribe_inner(audio, true)
+    }
+
+    pub fn try_transcribe_preview(&self, audio: Vec<f32>) -> Result<Option<String>> {
+        let Some(_inference_guard) = self.inference_coordinator.try_acquire_preview() else {
+            return Ok(None);
+        };
+
+        self.transcribe_inner(audio, false).map(Some)
+    }
+
+    fn transcribe_inner(&self, audio: Vec<f32>, allow_immediate_unload: bool) -> Result<String> {
         #[cfg(debug_assertions)]
         if std::env::var("HANDY_FORCE_TRANSCRIPTION_FAILURE").is_ok() {
             return Err(anyhow::anyhow!(
@@ -747,7 +906,9 @@ impl TranscriptionManager {
             info!("Transcription result: {}", final_result);
         }
 
-        self.maybe_unload_immediately("transcription");
+        if allow_immediate_unload {
+            self.maybe_unload_immediately("transcription");
+        }
 
         Ok(final_result)
     }
@@ -839,6 +1000,36 @@ fn is_context_hint_edge_punctuation(c: char) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Arc;
+
+    #[test]
+    fn interim_preview_is_skipped_while_final_is_reserved() {
+        let coordinator = Arc::new(InferenceCoordinator::default());
+        let intent = coordinator.reserve_final();
+
+        assert!(coordinator.try_acquire_preview().is_none());
+
+        drop(intent);
+        assert!(coordinator.try_acquire_preview().is_some());
+    }
+
+    #[test]
+    fn final_reservation_blocks_followup_previews_until_final_finishes() {
+        let coordinator = Arc::new(InferenceCoordinator::default());
+        let preview_guard = coordinator
+            .try_acquire_preview()
+            .expect("preview should start when idle");
+        let intent = coordinator.reserve_final();
+
+        assert!(coordinator.try_acquire_preview().is_none());
+
+        drop(preview_guard);
+        let final_guard = intent.acquire();
+        assert!(coordinator.try_acquire_preview().is_none());
+
+        drop(final_guard);
+        assert!(coordinator.try_acquire_preview().is_some());
+    }
 
     #[test]
     fn qwen_context_uses_only_custom_words() {

@@ -17,7 +17,7 @@ use log::{debug, error, warn};
 use once_cell::sync::Lazy;
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use tauri::Manager;
 use tauri::{AppHandle, Emitter};
 
@@ -51,6 +51,10 @@ struct TranscribeAction {
 
 /// Field name for structured output JSON schema
 const TRANSCRIPTION_FIELD: &str = "transcription";
+const POST_PROCESS_OPERATION_FIELD: &str = "operation";
+const POST_PROCESS_OPERATION_INSERT: &str = "insert";
+const POST_PROCESS_OPERATION_REPLACE_PREVIOUS: &str = "replace_previous";
+const POST_PROCESS_CONTEXT_WINDOW: Duration = Duration::from_secs(30);
 
 /// Strip invisible Unicode characters that some LLMs may insert
 fn strip_invisible_chars(s: &str) -> String {
@@ -63,7 +67,149 @@ fn build_system_prompt(prompt_template: &str) -> String {
     prompt_template.replace("${output}", "").trim().to_string()
 }
 
-async fn post_process_transcription(settings: &AppSettings, transcription: &str) -> Option<String> {
+fn recent_context_instruction(settings: &AppSettings) -> String {
+    let prompt = settings.post_process_context_prompt.trim();
+    if prompt.is_empty() {
+        crate::settings::default_post_process_context_prompt()
+    } else {
+        prompt.to_string()
+    }
+}
+
+#[derive(Clone, Debug)]
+struct PostProcessResult {
+    text: String,
+    replace_previous: bool,
+}
+
+impl PostProcessResult {
+    fn insert(text: String) -> Self {
+        Self {
+            text,
+            replace_previous: false,
+        }
+    }
+
+    fn with_operation(text: String, operation: Option<&str>) -> Self {
+        Self {
+            text,
+            replace_previous: matches!(
+                operation,
+                Some(value) if value == POST_PROCESS_OPERATION_REPLACE_PREVIOUS
+            ),
+        }
+    }
+}
+
+fn previous_inserted_text(context: &crate::post_process_context::RecentPostProcessContext) -> &str {
+    context
+        .post_processed_text
+        .as_deref()
+        .unwrap_or(&context.final_text)
+}
+
+fn format_recent_context(
+    context: &crate::post_process_context::RecentPostProcessContext,
+) -> String {
+    format!(
+        "P_raw:\n{}\n\nP:\n{}",
+        context.raw_transcription,
+        previous_inserted_text(context)
+    )
+}
+
+fn build_contextual_user_content(
+    transcription: &str,
+    context: Option<&crate::post_process_context::RecentPostProcessContext>,
+) -> String {
+    match context {
+        Some(context) => format!(
+            "{}\n\nC:\n{}",
+            format_recent_context(context),
+            transcription
+        ),
+        None => transcription.to_string(),
+    }
+}
+
+fn build_contextual_system_prompt(prompt: &str, context_prompt: &str) -> String {
+    let cleanup_prompt = build_system_prompt(prompt);
+    if cleanup_prompt.is_empty() {
+        return context_prompt.to_string();
+    }
+
+    format!(
+        "{context_prompt}\n\nCleanup rules for the `{TRANSCRIPTION_FIELD}` value only:\n{cleanup_prompt}\n\nIf the cleanup rules ask for plain text, treat that as applying inside the JSON `{TRANSCRIPTION_FIELD}` value. Always return the required JSON object."
+    )
+}
+
+fn build_legacy_post_process_prompt(
+    prompt: &str,
+    transcription: &str,
+    context: Option<&crate::post_process_context::RecentPostProcessContext>,
+    context_prompt: &str,
+) -> String {
+    match context {
+        Some(context) => format!(
+            "{}\n\n{}\n\nC:\n{}",
+            context_prompt,
+            format_recent_context(context),
+            transcription
+        ),
+        None => prompt.replace("${output}", transcription),
+    }
+}
+
+fn build_legacy_context_decision_prompt(
+    prompt_template: &str,
+    transcription: &str,
+    context: &crate::post_process_context::RecentPostProcessContext,
+    context_prompt: &str,
+) -> String {
+    let cleanup_prompt = build_system_prompt(prompt_template);
+    let cleanup_block = if cleanup_prompt.is_empty() {
+        String::new()
+    } else {
+        format!(
+            "\n\nCleanup rules for the `{TRANSCRIPTION_FIELD}` value only:\n{cleanup_prompt}\n\nIf the cleanup rules ask for plain text, treat that as applying inside the JSON `{TRANSCRIPTION_FIELD}` value. Always return the required JSON object."
+        )
+    };
+
+    format!(
+        "{}{}\n\n{}\n\nC:\n{}",
+        context_prompt,
+        cleanup_block,
+        format_recent_context(context),
+        transcription
+    )
+}
+
+fn json_object_candidate(content: &str) -> &str {
+    let trimmed = content.trim();
+    match (trimmed.find('{'), trimmed.rfind('}')) {
+        (Some(start), Some(end)) if start <= end => &trimmed[start..=end],
+        _ => trimmed,
+    }
+}
+
+fn parse_post_process_json_result(content: &str) -> Option<PostProcessResult> {
+    let json = serde_json::from_str::<serde_json::Value>(json_object_candidate(content)).ok()?;
+    let transcription = json.get(TRANSCRIPTION_FIELD).and_then(|t| t.as_str())?;
+    let operation = json
+        .get(POST_PROCESS_OPERATION_FIELD)
+        .and_then(|value| value.as_str());
+
+    Some(PostProcessResult::with_operation(
+        strip_invisible_chars(transcription),
+        operation,
+    ))
+}
+
+async fn post_process_transcription(
+    settings: &AppSettings,
+    transcription: &str,
+    recent_context: Option<&crate::post_process_context::RecentPostProcessContext>,
+) -> Option<PostProcessResult> {
     let provider = match settings.active_post_process_provider().cloned() {
         Some(provider) => provider,
         None => {
@@ -119,6 +265,8 @@ async fn post_process_transcription(settings: &AppSettings, transcription: &str)
         provider.id, model
     );
 
+    let context_prompt = recent_context_instruction(settings);
+
     let api_key = settings
         .post_process_api_keys
         .get(&provider.id)
@@ -144,8 +292,12 @@ async fn post_process_transcription(settings: &AppSettings, transcription: &str)
     if provider.supports_structured_output {
         debug!("Using structured outputs for provider '{}'", provider.id);
 
-        let system_prompt = build_system_prompt(&prompt);
-        let user_content = transcription.to_string();
+        let system_prompt = if recent_context.is_some() {
+            build_contextual_system_prompt(&prompt, &context_prompt)
+        } else {
+            build_system_prompt(&prompt)
+        };
+        let user_content = build_contextual_user_content(transcription, recent_context);
 
         // Handle Apple Intelligence separately since it uses native Swift APIs
         if provider.id == APPLE_INTELLIGENCE_PROVIDER_ID {
@@ -159,9 +311,24 @@ async fn post_process_transcription(settings: &AppSettings, transcription: &str)
                 }
 
                 let token_limit = model.trim().parse::<i32>().unwrap_or(0);
+                let (apple_system_prompt, apple_user_content) = if let Some(context) =
+                    recent_context
+                {
+                    (
+                            "Follow the user request exactly. When asked to return JSON, return only valid JSON with no markdown or explanation.".to_string(),
+                            build_legacy_context_decision_prompt(
+                                &prompt,
+                                transcription,
+                                context,
+                                &context_prompt,
+                            ),
+                        )
+                } else {
+                    (system_prompt.clone(), user_content.clone())
+                };
                 return match apple_intelligence::process_text_with_system_prompt(
-                    &system_prompt,
-                    &user_content,
+                    &apple_system_prompt,
+                    &apple_user_content,
                     token_limit,
                 ) {
                     Ok(result) => {
@@ -174,7 +341,12 @@ async fn post_process_transcription(settings: &AppSettings, transcription: &str)
                                 "Apple Intelligence post-processing succeeded. Output length: {} chars",
                                 result.len()
                             );
-                            Some(result)
+                            if recent_context.is_some() {
+                                parse_post_process_json_result(&result)
+                                    .or_else(|| Some(PostProcessResult::insert(result)))
+                            } else {
+                                Some(PostProcessResult::insert(result))
+                            }
                         }
                     }
                     Err(err) => {
@@ -197,10 +369,18 @@ async fn post_process_transcription(settings: &AppSettings, transcription: &str)
             "properties": {
                 (TRANSCRIPTION_FIELD): {
                     "type": "string",
-                    "description": "The cleaned and processed transcription text"
+                    "description": "For ordinary dictation, the cleaned new text to insert. For an edit request about previous inserted text, the complete replacement text for that previous insertion."
+                },
+                (POST_PROCESS_OPERATION_FIELD): {
+                    "type": "string",
+                    "enum": [
+                        POST_PROCESS_OPERATION_INSERT,
+                        POST_PROCESS_OPERATION_REPLACE_PREVIOUS
+                    ],
+                    "description": "Default to insert. Use replace_previous only when the current transcription clearly asks to edit, fix, replace, delete, or correct the recent previous text that Handy inserted into the active input field."
                 }
             },
-            "required": [TRANSCRIPTION_FIELD],
+            "required": [TRANSCRIPTION_FIELD, POST_PROCESS_OPERATION_FIELD],
             "additionalProperties": false
         });
 
@@ -218,31 +398,17 @@ async fn post_process_transcription(settings: &AppSettings, transcription: &str)
         {
             Ok(Some(content)) => {
                 // Parse the JSON response to extract the transcription field
-                match serde_json::from_str::<serde_json::Value>(&content) {
-                    Ok(json) => {
-                        if let Some(transcription_value) =
-                            json.get(TRANSCRIPTION_FIELD).and_then(|t| t.as_str())
-                        {
-                            let result = strip_invisible_chars(transcription_value);
-                            debug!(
-                                "Structured output post-processing succeeded for provider '{}'. Output length: {} chars",
-                                provider.id,
-                                result.len()
-                            );
-                            return Some(result);
-                        } else {
-                            error!("Structured output response missing 'transcription' field");
-                            return Some(strip_invisible_chars(&content));
-                        }
-                    }
-                    Err(e) => {
-                        error!(
-                            "Failed to parse structured output JSON: {}. Returning raw content.",
-                            e
-                        );
-                        return Some(strip_invisible_chars(&content));
-                    }
+                if let Some(result) = parse_post_process_json_result(&content) {
+                    debug!(
+                        "Structured output post-processing succeeded for provider '{}'. Output length: {} chars",
+                        provider.id,
+                        result.text.len()
+                    );
+                    return Some(result);
                 }
+
+                error!("Structured output response missing expected JSON fields");
+                return Some(PostProcessResult::insert(strip_invisible_chars(&content)));
             }
             Ok(None) => {
                 error!("LLM API response has no content");
@@ -259,7 +425,12 @@ async fn post_process_transcription(settings: &AppSettings, transcription: &str)
     }
 
     // Legacy mode: Replace ${output} variable in the prompt with the actual text
-    let processed_prompt = prompt.replace("${output}", transcription);
+    let legacy_expects_json = recent_context.is_some();
+    let processed_prompt = if let Some(context) = recent_context {
+        build_legacy_context_decision_prompt(&prompt, transcription, context, &context_prompt)
+    } else {
+        build_legacy_post_process_prompt(&prompt, transcription, recent_context, &context_prompt)
+    };
     debug!("Processed prompt length: {} chars", processed_prompt.len());
 
     match crate::llm_client::send_chat_completion(
@@ -279,7 +450,12 @@ async fn post_process_transcription(settings: &AppSettings, transcription: &str)
                 provider.id,
                 content.len()
             );
-            Some(content)
+            if legacy_expects_json {
+                parse_post_process_json_result(&content)
+                    .or_else(|| Some(PostProcessResult::insert(content)))
+            } else {
+                Some(PostProcessResult::insert(content))
+            }
         }
         Ok(None) => {
             error!("LLM API response has no content");
@@ -344,6 +520,7 @@ pub(crate) struct ProcessedTranscription {
     pub final_text: String,
     pub post_processed_text: Option<String>,
     pub post_process_prompt: Option<String>,
+    pub replace_previous_char_count: Option<usize>,
 }
 
 pub(crate) async fn process_transcription_output(
@@ -351,19 +528,47 @@ pub(crate) async fn process_transcription_output(
     transcription: &str,
     post_process: bool,
 ) -> ProcessedTranscription {
+    process_transcription_output_with_context(app, transcription, post_process, true).await
+}
+
+pub(crate) async fn process_transcription_output_with_context(
+    app: &AppHandle,
+    transcription: &str,
+    post_process: bool,
+    use_recent_context: bool,
+) -> ProcessedTranscription {
     let settings = get_settings(app);
     let mut final_text = transcription.to_string();
     let mut post_processed_text: Option<String> = None;
     let mut post_process_prompt: Option<String> = None;
+    let mut replace_previous_char_count: Option<usize> = None;
 
     if let Some(converted_text) = maybe_convert_chinese_variant(&settings, transcription).await {
         final_text = converted_text;
     }
 
     if post_process {
-        if let Some(processed_text) = post_process_transcription(&settings, &final_text).await {
-            post_processed_text = Some(processed_text.clone());
-            final_text = processed_text;
+        let recent_context = if use_recent_context {
+            crate::post_process_context::recent(app, POST_PROCESS_CONTEXT_WINDOW)
+        } else {
+            None
+        };
+
+        if let Some(processed) =
+            post_process_transcription(&settings, &final_text, recent_context.as_ref()).await
+        {
+            let should_replace_previous = recent_context.as_ref().is_some_and(|context| {
+                context.inserted_char_count > 0 && processed.replace_previous
+            });
+
+            if should_replace_previous {
+                replace_previous_char_count = recent_context
+                    .as_ref()
+                    .map(|context| context.inserted_char_count);
+            }
+
+            post_processed_text = Some(processed.text.clone());
+            final_text = processed.text;
 
             if let Some(prompt_id) = &settings.post_process_selected_prompt_id {
                 if let Some(prompt) = settings
@@ -383,6 +588,7 @@ pub(crate) async fn process_transcription_output(
         final_text,
         post_processed_text,
         post_process_prompt,
+        replace_previous_char_count,
     }
 }
 
@@ -458,6 +664,7 @@ impl ShortcutAction for TranscribeAction {
         }
 
         if recording_error.is_none() {
+            crate::interim_transcription::start_session(app);
             // Dynamically register the cancel shortcut in a separate task to avoid deadlock
             shortcut::register_cancel_shortcut(app);
         } else {
@@ -500,9 +707,11 @@ impl ShortcutAction for TranscribeAction {
         let rm = Arc::clone(&app.state::<Arc<AudioRecordingManager>>());
         let tm = Arc::clone(&app.state::<Arc<TranscriptionManager>>());
         let hm = Arc::clone(&app.state::<Arc<HistoryManager>>());
+        let mut final_transcription_intent = Some(tm.reserve_final_transcription());
 
         change_tray_icon(app, TrayIconState::Transcribing);
         show_transcribing_overlay(app);
+        crate::interim_transcription::finish_session(app);
 
         // Unmute before playing audio feedback so the stop sound is audible
         rm.remove_mute();
@@ -529,6 +738,7 @@ impl ShortcutAction for TranscribeAction {
                 );
 
                 if samples.is_empty() {
+                    drop(final_transcription_intent.take());
                     debug!("Recording produced no audio samples; skipping persistence");
                     utils::hide_recording_overlay(&ah);
                     change_tray_icon(&ah, TrayIconState::Idle);
@@ -545,7 +755,12 @@ impl ShortcutAction for TranscribeAction {
 
                     // Transcribe concurrently with WAV save
                     let transcription_time = Instant::now();
-                    let transcription_result = tm.transcribe(samples);
+                    let transcription_result = tm.transcribe_with_intent(
+                        samples,
+                        final_transcription_intent
+                            .take()
+                            .unwrap_or_else(|| tm.reserve_final_transcription()),
+                    );
 
                     // Await WAV save and verify
                     let wav_saved = match wav_handle.await {
@@ -585,12 +800,13 @@ impl ShortcutAction for TranscribeAction {
                             let processed =
                                 process_transcription_output(&ah, &transcription, post_process)
                                     .await;
+                            let raw_transcription_for_context = transcription.clone();
 
                             // Save to history if WAV was saved
                             if wav_saved {
                                 if let Err(err) = hm.save_entry(
                                     file_name,
-                                    transcription,
+                                    transcription.clone(),
                                     post_process,
                                     processed.post_processed_text.clone(),
                                     processed.post_process_prompt.clone(),
@@ -605,13 +821,39 @@ impl ShortcutAction for TranscribeAction {
                             } else {
                                 let ah_clone = ah.clone();
                                 let paste_time = Instant::now();
+                                let post_processed_for_context =
+                                    processed.post_processed_text.clone();
                                 let final_text = processed.final_text;
+                                let final_text_for_context = final_text.clone();
+                                let replace_previous_char_count =
+                                    processed.replace_previous_char_count;
                                 ah.run_on_main_thread(move || {
-                                    match utils::paste(final_text, ah_clone.clone()) {
-                                        Ok(()) => debug!(
-                                            "Text pasted successfully in {:?}",
-                                            paste_time.elapsed()
-                                        ),
+                                    let paste_result = if let Some(previous_char_count) =
+                                        replace_previous_char_count
+                                    {
+                                        crate::recent_transcription_undo::replace_recent_insertion(
+                                            &ah_clone,
+                                            previous_char_count,
+                                            final_text,
+                                        )
+                                    } else {
+                                        utils::paste(final_text, ah_clone.clone())
+                                    };
+
+                                    match paste_result {
+                                        Ok(inserted_char_count) => {
+                                            debug!(
+                                                "Text pasted successfully in {:?}",
+                                                paste_time.elapsed()
+                                            );
+                                            crate::post_process_context::record(
+                                                &ah_clone,
+                                                raw_transcription_for_context,
+                                                final_text_for_context,
+                                                post_processed_for_context,
+                                                inserted_char_count,
+                                            );
+                                        }
                                         Err(e) => {
                                             error!("Failed to paste transcription: {}", e);
                                             let _ = ah_clone.emit("paste-error", ());
@@ -647,6 +889,7 @@ impl ShortcutAction for TranscribeAction {
                     }
                 }
             } else {
+                drop(final_transcription_intent.take());
                 debug!("No samples retrieved from recording stop");
                 utils::hide_recording_overlay(&ah);
                 change_tray_icon(&ah, TrayIconState::Idle);
@@ -719,3 +962,43 @@ pub static ACTION_MAP: Lazy<HashMap<String, Arc<dyn ShortcutAction>>> = Lazy::ne
     );
     map
 });
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_replace_previous_operation_from_json() {
+        let result = parse_post_process_json_result(
+            r#"{"operation":"replace_previous","transcription":"이전 입력을 고친 문장입니다."}"#,
+        )
+        .expect("JSON result should parse");
+
+        assert!(result.replace_previous);
+        assert_eq!(result.text, "이전 입력을 고친 문장입니다.");
+    }
+
+    #[test]
+    fn parses_json_even_when_wrapped_in_markdown() {
+        let result = parse_post_process_json_result(
+            "```json\n{\"operation\":\"insert\",\"transcription\":\"새 문장입니다.\"}\n```",
+        )
+        .expect("wrapped JSON result should parse");
+
+        assert!(!result.replace_previous);
+        assert_eq!(result.text, "새 문장입니다.");
+    }
+
+    #[test]
+    fn contextual_system_prompt_preserves_selected_cleanup_prompt() {
+        let prompt = "Clean this transcript:\n- Add punctuation.\n\nTranscript:\n${output}";
+        let context_prompt = "Return JSON with operation and transcription. Default to insert.";
+
+        let result = build_contextual_system_prompt(prompt, context_prompt);
+
+        assert!(result.contains(context_prompt));
+        assert!(result.contains("Clean this transcript"));
+        assert!(result.contains("Add punctuation"));
+        assert!(result.contains("Always return the required JSON object"));
+    }
+}

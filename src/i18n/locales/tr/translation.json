@@ -423,7 +423,15 @@
         "createPrompt": "Prompt Oluştur",
         "cancel": "İptal",
         "selectToEdit": "Ayrıntılarını görüntülemek ve düzenlemek için yukarıdan bir prompt seçin.",
-        "createFirst": "İlk son işlem prompt'unuzu oluşturmak için yukarıdaki “Yeni Prompt Oluştur” seçeneğine tıklayın."
+        "createFirst": "İlk son işlem prompt'unuzu oluşturmak için yukarıdaki “Yeni Prompt Oluştur” seçeneğine tıklayın.",
+        "contextPrompt": {
+          "title": "Previous Input Decision Prompt",
+          "description": "Controls how the local LLM decides whether the current transcript should be inserted as new text or used to replace the previous inserted text.",
+          "placeholder": "Write the decision prompt used with P_raw, P, and C.",
+          "tip": "The app appends <code>P_raw</code> (previous raw transcript), <code>P</code> (previous inserted text), and <code>C</code> (current raw transcript). The model must return JSON with <code>operation</code> and <code>transcription</code>.",
+          "update": "Update Decision Prompt",
+          "reset": "Reset to Default"
+        }
       }
     },
     "history": {
