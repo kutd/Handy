@@ -173,11 +173,13 @@ pub fn initialize_shortcuts(app: AppHandle) -> Result<(), String> {
     // Check if already initialized
     if app.try_state::<ShortcutsInitialized>().is_some() {
         log::debug!("Shortcuts already initialized");
+        crate::recent_transcription_undo::start_shortcut_listener(&app);
         return Ok(());
     }
 
     // Initialize shortcuts
     crate::shortcut::init_shortcuts(&app);
+    crate::recent_transcription_undo::start_shortcut_listener(&app);
 
     // Mark as initialized
     app.manage(ShortcutsInitialized);

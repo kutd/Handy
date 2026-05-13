@@ -144,6 +144,25 @@ pub fn change_binding(
         }
     };
 
+    // Recent transcription undo is handled by a release-aware listener so it can
+    // support side-specific modifier-only shortcuts such as right Command.
+    if id == "delete_recent_transcription" {
+        if let Err(e) = handy_keys::validate_shortcut(&binding) {
+            warn!("change_binding validation error: {}", e);
+            return Err(e);
+        }
+
+        let mut updated_binding = binding_to_modify;
+        updated_binding.current_binding = binding;
+        settings.bindings.insert(id, updated_binding.clone());
+        settings::write_settings(&app, settings);
+        return Ok(BindingResponse {
+            success: true,
+            binding: Some(updated_binding),
+            error: None,
+        });
+    }
+
     // If this is the cancel binding, just update the settings and return
     // It's managed dynamically, so we don't register/unregister here
     if id == "cancel" {
@@ -213,6 +232,10 @@ pub fn reset_binding(app: AppHandle, id: String) -> Result<BindingResponse, Stri
 #[tauri::command]
 #[specta::specta]
 pub fn suspend_binding(app: AppHandle, id: String) -> Result<(), String> {
+    if id == "delete_recent_transcription" {
+        return Ok(());
+    }
+
     if let Some(b) = settings::get_bindings(&app).get(&id).cloned() {
         if let Err(e) = unregister_shortcut(&app, b) {
             error!("suspend_binding error for id '{}': {}", id, e);
@@ -226,6 +249,10 @@ pub fn suspend_binding(app: AppHandle, id: String) -> Result<(), String> {
 #[tauri::command]
 #[specta::specta]
 pub fn resume_binding(app: AppHandle, id: String) -> Result<(), String> {
+    if id == "delete_recent_transcription" {
+        return Ok(());
+    }
+
     if let Some(b) = settings::get_bindings(&app).get(&id).cloned() {
         if let Err(e) = register_shortcut(&app, b) {
             error!("resume_binding error for id '{}': {}", id, e);
@@ -1057,6 +1084,23 @@ pub fn change_append_trailing_space_setting(app: AppHandle, enabled: bool) -> Re
     let mut settings = settings::get_settings(&app);
     settings.append_trailing_space = enabled;
     settings::write_settings(&app, settings);
+    Ok(())
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn change_recent_transcription_undo_enabled_setting(
+    app: AppHandle,
+    enabled: bool,
+) -> Result<(), String> {
+    let mut settings = settings::get_settings(&app);
+    settings.recent_transcription_undo_enabled = enabled;
+    settings::write_settings(&app, settings);
+
+    if !enabled {
+        crate::recent_transcription_undo::clear_candidate(&app);
+    }
+
     Ok(())
 }
 

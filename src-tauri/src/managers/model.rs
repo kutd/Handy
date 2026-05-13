@@ -497,6 +497,7 @@ impl ModelManager {
                 supports_translation: false,
                 is_recommended: false,
                 supported_languages: vec![
+                    "ko-en".to_string(),
                     "en".to_string(),
                     "zh".to_string(),
                     "zh-Hans".to_string(),
@@ -531,6 +532,7 @@ impl ModelManager {
                 supports_translation: false,
                 is_recommended: false,
                 supported_languages: vec![
+                    "ko-en".to_string(),
                     "en".to_string(),
                     "zh".to_string(),
                     "zh-Hans".to_string(),

@@ -194,6 +194,10 @@
           "transcribe_with_post_process": {
             "name": "Tecla de Post Procesamiento",
             "description": "Opcional: Una tecla de acceso rápido dedicada que siempre aplica post procesamiento con IA a tu transcripción."
+          },
+          "delete_recent_transcription": {
+            "name": "Delete Last Inserted Transcription",
+            "description": "Within 5 seconds after transcription is inserted, use this shortcut to delete only that inserted text."
           }
         },
         "errors": {
@@ -356,6 +360,10 @@
         "add": "Agregar",
         "remove": "Eliminar {{word}}",
         "duplicate": "\"{{word}}\" ya existe"
+      },
+      "recentTranscriptionUndo": {
+        "label": "Delete Last Inserted Transcription",
+        "description": "Enable the shortcut that deletes only the text inserted by the most recent transcription."
       }
     },
     "postProcessing": {

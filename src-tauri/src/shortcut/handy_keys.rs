@@ -430,7 +430,7 @@ pub fn init_shortcuts(app: &AppHandle) -> Result<(), String> {
 
     // Register all bindings except cancel (which is dynamic)
     for (id, default_binding) in default_bindings {
-        if id == "cancel" {
+        if id == "cancel" || id == "delete_recent_transcription" {
             continue;
         }
         // Skip post-processing shortcut when the feature is disabled

@@ -176,6 +176,10 @@
           "transcribe_with_post_process": {
             "name": "後處理快捷鍵",
             "description": "可選：專用快捷鍵，使用時一律對轉錄結果套用 AI 後處理"
+          },
+          "delete_recent_transcription": {
+            "name": "Delete Last Inserted Transcription",
+            "description": "Within 5 seconds after transcription is inserted, use this shortcut to delete only that inserted text."
           }
         },
         "errors": {
@@ -356,6 +360,10 @@
         "add": "新增",
         "remove": "刪除 {{word}}",
         "duplicate": "「{{word}}」已存在"
+      },
+      "recentTranscriptionUndo": {
+        "label": "Delete Last Inserted Transcription",
+        "description": "Enable the shortcut that deletes only the text inserted by the most recent transcription."
       }
     },
     "postProcessing": {

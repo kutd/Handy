@@ -194,6 +194,10 @@
           "transcribe_with_post_process": {
             "name": "Nachbearbeitungs-Tastenkürzel",
             "description": "Optional: Ein dediziertes Tastenkürzel, das immer die KI-Nachbearbeitung auf deine Transkription anwendet."
+          },
+          "delete_recent_transcription": {
+            "name": "Delete Last Inserted Transcription",
+            "description": "Within 5 seconds after transcription is inserted, use this shortcut to delete only that inserted text."
           }
         },
         "errors": {
@@ -356,6 +360,10 @@
         "add": "Hinzufügen",
         "remove": "{{word}} entfernen",
         "duplicate": "\"{{word}}\" existiert bereits"
+      },
+      "recentTranscriptionUndo": {
+        "label": "Delete Last Inserted Transcription",
+        "description": "Enable the shortcut that deletes only the text inserted by the most recent transcription."
       }
     },
     "postProcessing": {

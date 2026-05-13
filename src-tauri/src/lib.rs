@@ -12,6 +12,7 @@ mod llm_client;
 mod managers;
 mod overlay;
 pub mod portable;
+mod recent_transcription_undo;
 mod settings;
 mod shortcut;
 mod signal_handle;
@@ -164,6 +165,7 @@ fn initialize_core_logic(app_handle: &AppHandle) {
     app_handle.manage(model_manager.clone());
     app_handle.manage(transcription_manager.clone());
     app_handle.manage(history_manager.clone());
+    app_handle.manage(recent_transcription_undo::RecentTranscriptionUndo::new());
 
     // Note: Shortcuts are NOT initialized here.
     // The frontend is responsible for calling the `initialize_shortcuts` command
@@ -362,6 +364,7 @@ pub fn run(cli_args: CliArgs) {
             shortcut::resume_binding,
             shortcut::change_mute_while_recording_setting,
             shortcut::change_append_trailing_space_setting,
+            shortcut::change_recent_transcription_undo_enabled_setting,
             shortcut::change_lazy_stream_close_setting,
             shortcut::change_app_language_setting,
             shortcut::change_update_checks_setting,

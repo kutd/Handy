@@ -172,6 +172,10 @@
           "transcribe_with_post_process": {
             "name": "مفتاح المعالجة اللاحقة",
             "description": "اختياري: مفتاح اختصار مخصص يطبق دائماً المعالجة اللاحقة بالذكاء الاصطناعي على التفريغ الصوتي."
+          },
+          "delete_recent_transcription": {
+            "name": "Delete Last Inserted Transcription",
+            "description": "Within 5 seconds after transcription is inserted, use this shortcut to delete only that inserted text."
           }
         },
         "errors": {
@@ -334,6 +338,10 @@
         "add": "إضافة",
         "remove": "إزالة {{word}}",
         "duplicate": "\"{{word}}\" موجود بالفعل"
+      },
+      "recentTranscriptionUndo": {
+        "label": "Delete Last Inserted Transcription",
+        "description": "Enable the shortcut that deletes only the text inserted by the most recent transcription."
       }
     },
     "postProcessing": {

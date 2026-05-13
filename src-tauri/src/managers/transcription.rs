@@ -781,6 +781,7 @@ impl TranscriptionManager {
 
 fn qwen3_language_hint(language: &str) -> Option<String> {
     match language {
+        "ko-en" => Some("Korean or English".to_string()),
         "ko" => Some("Korean".to_string()),
         "en" => Some("English".to_string()),
         "ja" => Some("Japanese".to_string()),
@@ -790,8 +791,13 @@ fn qwen3_language_hint(language: &str) -> Option<String> {
     }
 }
 
-fn build_qwen3_context(custom_words: &[String], _language: &str) -> String {
+const QWEN3_KOREAN_ENGLISH_CONTEXT_HINT: &str = "Korean/English only";
+
+fn build_qwen3_context(custom_words: &[String], language: &str) -> String {
     let mut parts = Vec::new();
+    if language == "ko-en" {
+        parts.push(QWEN3_KOREAN_ENGLISH_CONTEXT_HINT.to_string());
+    }
     parts.extend(
         custom_words
             .iter()
@@ -806,7 +812,9 @@ fn remove_qwen3_context_leak(text: &str) -> String {
     const LEGACY_KOREAN_CONTEXT_HINT: &str =
         "핸디 한국어 받아쓰기 회의 메모 일정 연락 숫자 고유명사";
 
-    if text_matches_qwen3_context_hint(text, LEGACY_KOREAN_CONTEXT_HINT) {
+    if text_matches_qwen3_context_hint(text, LEGACY_KOREAN_CONTEXT_HINT)
+        || text_matches_qwen3_context_hint(text, QWEN3_KOREAN_ENGLISH_CONTEXT_HINT)
+    {
         String::new()
     } else {
         text.trim().to_string()
@@ -839,6 +847,28 @@ mod tests {
         assert_eq!(build_qwen3_context(&custom_words, "ko"), "코덱스 Handy");
         assert_eq!(build_qwen3_context(&[], "ko"), "");
         assert_eq!(build_qwen3_context(&[], "auto"), "");
+    }
+
+    #[test]
+    fn qwen_context_restricts_korean_english_mode() {
+        let custom_words = vec!["Handy".to_string()];
+
+        assert_eq!(
+            qwen3_language_hint("ko-en"),
+            Some("Korean or English".to_string())
+        );
+        assert_eq!(
+            build_qwen3_context(&custom_words, "ko-en"),
+            format!("{QWEN3_KOREAN_ENGLISH_CONTEXT_HINT} Handy")
+        );
+    }
+
+    #[test]
+    fn qwen_context_leak_removes_korean_english_hint_only() {
+        assert_eq!(
+            remove_qwen3_context_leak(QWEN3_KOREAN_ENGLISH_CONTEXT_HINT),
+            ""
+        );
     }
 
     #[test]

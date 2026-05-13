@@ -659,6 +659,10 @@ pub fn paste(text: String, app_handle: AppHandle) -> Result<(), String> {
             .map_err(|e| format!("Failed to copy to clipboard: {}", e))?;
     }
 
+    if paste_method != PasteMethod::None {
+        crate::recent_transcription_undo::record_inserted_text(&app_handle, &text);
+    }
+
     Ok(())
 }
 

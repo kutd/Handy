@@ -405,6 +405,8 @@ pub struct AppSettings {
     pub mute_while_recording: bool,
     #[serde(default)]
     pub append_trailing_space: bool,
+    #[serde(default = "default_recent_transcription_undo_enabled")]
+    pub recent_transcription_undo_enabled: bool,
     #[serde(default = "default_app_language")]
     pub app_language: String,
     #[serde(default)]
@@ -485,6 +487,10 @@ fn default_paste_delay_ms() -> u64 {
 
 fn default_auto_submit() -> bool {
     false
+}
+
+fn default_recent_transcription_undo_enabled() -> bool {
+    true
 }
 
 fn default_history_limit() -> usize {
@@ -763,6 +769,21 @@ pub fn get_default_settings() -> AppSettings {
             current_binding: "escape".to_string(),
         },
     );
+    #[cfg(target_os = "macos")]
+    let default_recent_transcription_undo_shortcut = "command_right";
+    #[cfg(not(target_os = "macos"))]
+    let default_recent_transcription_undo_shortcut = "ctrl+alt+backspace";
+
+    bindings.insert(
+        "delete_recent_transcription".to_string(),
+        ShortcutBinding {
+            id: "delete_recent_transcription".to_string(),
+            name: "Delete Last Inserted Transcription".to_string(),
+            description: "Deletes the text inserted by the most recent transcription.".to_string(),
+            default_binding: default_recent_transcription_undo_shortcut.to_string(),
+            current_binding: default_recent_transcription_undo_shortcut.to_string(),
+        },
+    );
 
     AppSettings {
         bindings,
@@ -801,6 +822,7 @@ pub fn get_default_settings() -> AppSettings {
         post_process_selected_prompt_id: None,
         mute_while_recording: false,
         append_trailing_space: false,
+        recent_transcription_undo_enabled: default_recent_transcription_undo_enabled(),
         app_language: default_app_language(),
         experimental_enabled: false,
         lazy_stream_close: false,
@@ -847,12 +869,23 @@ pub fn load_or_create_app_settings(app: &AppHandle) -> AppSettings {
         .expect("Failed to initialize store");
 
     let mut settings = if let Some(settings_value) = store.get("settings") {
+        let had_recent_undo_setting = settings_value
+            .as_object()
+            .map(|settings| settings.contains_key("recent_transcription_undo_enabled"))
+            .unwrap_or(false);
+
         // Parse the entire settings object
         match serde_json::from_value::<AppSettings>(settings_value) {
             Ok(mut settings) => {
                 debug!("Found existing settings: {:?}", settings);
                 let default_settings = get_default_settings();
                 let mut updated = false;
+
+                if !had_recent_undo_setting {
+                    settings.recent_transcription_undo_enabled =
+                        default_recent_transcription_undo_enabled();
+                    updated = true;
+                }
 
                 // Merge default bindings into existing settings
                 for (key, value) in default_settings.bindings {
@@ -897,11 +930,25 @@ pub fn get_settings(app: &AppHandle) -> AppSettings {
         .expect("Failed to initialize store");
 
     let mut settings = if let Some(settings_value) = store.get("settings") {
-        serde_json::from_value::<AppSettings>(settings_value).unwrap_or_else(|_| {
-            let default_settings = get_default_settings();
-            store.set("settings", serde_json::to_value(&default_settings).unwrap());
-            default_settings
-        })
+        let had_recent_undo_setting = settings_value
+            .as_object()
+            .map(|settings| settings.contains_key("recent_transcription_undo_enabled"))
+            .unwrap_or(false);
+
+        let mut settings =
+            serde_json::from_value::<AppSettings>(settings_value).unwrap_or_else(|_| {
+                let default_settings = get_default_settings();
+                store.set("settings", serde_json::to_value(&default_settings).unwrap());
+                default_settings
+            });
+
+        if !had_recent_undo_setting {
+            settings.recent_transcription_undo_enabled =
+                default_recent_transcription_undo_enabled();
+            store.set("settings", serde_json::to_value(&settings).unwrap());
+        }
+
+        settings
     } else {
         let default_settings = get_default_settings();
         store.set("settings", serde_json::to_value(&default_settings).unwrap());
@@ -956,6 +1003,15 @@ mod tests {
         let settings = get_default_settings();
         assert!(!settings.auto_submit);
         assert_eq!(settings.auto_submit_key, AutoSubmitKey::Enter);
+    }
+
+    #[test]
+    fn recent_transcription_undo_defaults_to_enabled() {
+        let settings = get_default_settings();
+        assert!(settings.recent_transcription_undo_enabled);
+        assert!(settings
+            .bindings
+            .contains_key("delete_recent_transcription"));
     }
 
     #[test]
